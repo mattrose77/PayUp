@@ -1,0 +1,8 @@
+.DS_Store
+build/
+*.xcuserdatad
+xcuserdata/
+.swiftpm/
+
+# Real credentials — see Config/Secrets.example.xcconfig
+Config/Secrets.xcconfig

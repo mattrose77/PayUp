@@ -1,23 +1,17 @@
 import SwiftUI
-import SwiftData
 
 struct MatchesView: View {
     let auth: AuthService
-    @Environment(\.modelContext) private var context
-    @Environment(\.teamSession) private var session
-    @Query(sort: \Match.date, order: .reverse) private var allMatches: [Match]
-    @Query private var everyFine: [Fine]
-    @Query(sort: \Player.rotaOrder) private var allPlayers: [Player]
-
-    private var matches: [Match] { allMatches.scoped(to: session.team?.id) }
-    private var allFines: [Fine] { everyFine.scoped(to: session.team?.id) }
-    private var players: [Player] { allPlayers.scoped(to: session.team?.id) }
+    @Environment(\.teamDataStore) private var store
 
     @State private var showingNewMatch = false
     @State private var showingSettings = false
     @State private var pendingDelete: Match?
+    @State private var error: String?
 
-    private var stats: SeasonStats { SeasonStats(fines: allFines) }
+    private var canStartMatchday: Bool {
+        !store.activePlayers.isEmpty && !store.activeFineTypes.isEmpty
+    }
 
     var body: some View {
         NavigationStack {
@@ -26,44 +20,47 @@ struct MatchesView: View {
                     ScreenHeader(title: "PayUp", subtitle: "Matchday fines") {
                         HStack(spacing: 10) {
                             HeaderIconButton(systemName: "gearshape.fill") { showingSettings = true }
-                            HeaderAddButton(enabled: !players.isEmpty) { showingNewMatch = true }
+                            if !store.matches.isEmpty {
+                                HeaderAddButton(enabled: canStartMatchday) { showingNewMatch = true }
+                            }
                         }
                     }
 
-                    SeasonPotCard(stats: stats)
-                        .padding(.bottom, 6)
+                    DataStateContainer(state: store.state, retry: { await store.refresh() }) {
+                        SeasonPotCard(stats: store.seasonStats)
+                            .padding(.bottom, 6)
 
-                    HStack {
-                        SectionLabel(text: "Matchdays")
-                        Spacer()
-                        Text("\(matches.count)")
-                            .font(.tally(12, .bold))
-                            .foregroundStyle(Theme.textFaint)
-                    }
-                    .padding(.horizontal, 4)
+                        if let error {
+                            Text(error)
+                                .font(.system(size: 13))
+                                .foregroundStyle(Color(hex: 0xFF6B6B))
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal, 4)
+                        }
 
-                    if matches.isEmpty {
-                        EmptyHint(
-                            icon: "sportscourt",
-                            title: "No matchdays yet",
-                            message: players.isEmpty
-                                ? "Add your squad first, then start a matchday to begin fining."
-                                : "Tap + to start a matchday and open the tally."
-                        )
-                        .cardSurface(Theme.Radius.card)
-                    } else {
-                        ForEach(matches) { match in
-                            NavigationLink {
-                                TallyView(match: match)
-                            } label: {
-                                MatchRow(match: match)
+                        if store.matches.isEmpty {
+                            emptyState
+                        } else {
+                            HStack {
+                                SectionLabel(text: "Matchdays")
+                                Spacer()
+                                Text("\(store.matches.count)")
+                                    .font(.tally(12, .bold))
+                                    .foregroundStyle(Theme.textFaint)
                             }
-                            .buttonStyle(.plain)
-                            .contextMenu {
-                                Button(role: .destructive) {
-                                    pendingDelete = match
+                            .padding(.horizontal, 4)
+
+                            ForEach(store.matches) { match in
+                                NavigationLink {
+                                    TallyView(matchId: match.id).environment(\.teamDataStore, store)
                                 } label: {
-                                    Label("Delete matchday", systemImage: "trash")
+                                    MatchRow(match: match, fines: store.fines(forMatch: match.id))
+                                }
+                                .buttonStyle(.plain)
+                                .contextMenu {
+                                    Button(role: .destructive) { pendingDelete = match } label: {
+                                        Label("Delete matchday", systemImage: "trash")
+                                    }
                                 }
                             }
                         }
@@ -72,10 +69,12 @@ struct MatchesView: View {
                 .padding(.horizontal, 18)
                 .padding(.bottom, 28)
             }
+            .refreshable { await store.refresh() }
             .screenBackground()
             .toolbar(.hidden, for: .navigationBar)
+            .task { await store.loadIfNeeded() }
             .sheet(isPresented: $showingNewMatch) {
-                NewMatchSheet(players: players)
+                NewMatchSheet().environment(\.teamDataStore, store)
             }
             .sheet(isPresented: $showingSettings) {
                 SettingsView(auth: auth)
@@ -96,29 +95,65 @@ struct MatchesView: View {
         }
     }
 
-    /// Deleting a matchday cascades its fines, which quietly rewrites the season
-    /// pot — including money already collected. Say so before doing it.
-    private func deleteWarning(for match: Match) -> String {
-        let count = match.fines.count
-        guard count > 0 else { return "There are no fines on this matchday." }
-        let collected = match.fines.filter(\.isPaid).reduce(0) { $0 + $1.amountPence }
-        var text = "This also deletes \(count) fine\(count == 1 ? "" : "s") worth \(Money.string(match.total))."
-        if collected > 0 {
-            text += " \(Money.string(collected)) of that is already marked paid."
+    /// A matchday needs players to fine and fines to give them, so say which
+    /// is missing rather than offering a dead button.
+    @ViewBuilder
+    private var emptyState: some View {
+        if store.activePlayers.isEmpty || store.activeFineTypes.isEmpty {
+            EmptyStateView(
+                icon: "sportscourt",
+                title: "Set up first",
+                message: setupMessage
+            )
+        } else {
+            EmptyStateView(
+                icon: "sportscourt",
+                title: "No matchdays yet",
+                message: "A matchday is where fines get logged — pick an offence, tap whoever earned it. Start one after a game.",
+                actionTitle: "Start a matchday",
+                action: { showingNewMatch = true }
+            )
         }
+    }
+
+    private var setupMessage: String {
+        let noPlayers = store.activePlayers.isEmpty
+        let noFines = store.activeFineTypes.isEmpty
+        if noPlayers && noFines {
+            return "A matchday needs a squad to fine and a list of offences to fine them for. Add some players in the Squad tab and build your fines list in the Fines tab, then come back."
+        }
+        if noPlayers {
+            return "You've got your fines list, but nobody to give them to. Add your squad in the Squad tab first."
+        }
+        return "You've got a squad, but no offences to fine them for. Build your fines list in the Fines tab first."
+    }
+
+    private func deleteWarning(for match: Match) -> String {
+        let fines = store.fines(forMatch: match.id)
+        guard !fines.isEmpty else { return "There are no fines on this matchday." }
+        let paid = fines.paidPence
+        var text = "This also deletes \(fines.count) fine\(fines.count == 1 ? "" : "s") worth \(Money.string(fines.totalPence))."
+        if paid > 0 { text += " \(Money.string(paid)) of that is already marked paid." }
         return text + " This can't be undone."
     }
 
     private func delete(_ match: Match) {
-        context.delete(match)
-        try? context.save()
         pendingDelete = nil
-        Haptics.bump()
+        error = nil
+        Task {
+            do {
+                try await store.deleteMatch(match)
+                Haptics.bump()
+            } catch {
+                self.error = error.localizedDescription
+            }
+        }
     }
 }
 
 private struct MatchRow: View {
     let match: Match
+    let fines: [Fine]
 
     var body: some View {
         HStack(spacing: 14) {
@@ -132,11 +167,10 @@ private struct MatchRow: View {
                             .font(.system(size: 10))
                             .foregroundStyle(Theme.textFaint)
                     }
-                    Text(match.date, format: .dateTime.weekday(.abbreviated).day().month(.abbreviated))
+                    Text(match.playedOn, format: .dateTime.weekday(.abbreviated).day().month(.abbreviated))
                     if !match.itemOfTheWeek.isEmpty {
                         Text("·")
-                        Text("Item: \(match.itemOfTheWeek)")
-                            .lineLimit(1)
+                        Text("Item: \(match.itemOfTheWeek)").lineLimit(1)
                     }
                 }
                 .font(.system(size: 13))
@@ -146,13 +180,9 @@ private struct MatchRow: View {
             Spacer(minLength: 8)
 
             VStack(alignment: .trailing, spacing: 4) {
-                // What's left to collect, not what was fined — a settled
-                // matchday drops to £0 so there's nothing to chase.
-                Text(Money.string(match.outstanding))
+                Text(Money.string(fines.outstandingPence))
                     .font(.tally(20, .bold))
-                    .foregroundStyle(match.outstanding > 0 ? Theme.accent : Theme.textFaint)
-                    .contentTransition(.numericText())
-                    .animation(.snappy(duration: 0.25), value: match.outstanding)
+                    .foregroundStyle(fines.outstandingPence > 0 ? Theme.accent : Theme.textFaint)
                 caption
             }
         }
@@ -163,20 +193,17 @@ private struct MatchRow: View {
 
     @ViewBuilder
     private var caption: some View {
-        if match.fines.isEmpty {
-            Text("No fines")
-                .font(.system(size: 12))
-                .foregroundStyle(Theme.textDim)
-        } else if match.outstanding == 0 {
+        if fines.isEmpty {
+            Text("No fines").font(.system(size: 12)).foregroundStyle(Theme.textDim)
+        } else if fines.outstandingPence == 0 {
             HStack(spacing: 4) {
-                Image(systemName: "checkmark.seal.fill")
-                    .font(.system(size: 10))
-                Text("\(Money.string(match.total)) all in")
+                Image(systemName: "checkmark.seal.fill").font(.system(size: 10))
+                Text("\(Money.string(fines.totalPence)) all in")
             }
             .font(.system(size: 12))
             .foregroundStyle(Theme.textDim)
         } else {
-            Text("left of \(Money.string(match.total)) · \(match.fines.count) fine\(match.fines.count == 1 ? "" : "s")")
+            Text("left of \(Money.string(fines.totalPence)) · \(fines.count) fine\(fines.count == 1 ? "" : "s")")
                 .font(.system(size: 12))
                 .foregroundStyle(Theme.textDim)
                 .lineLimit(1)
@@ -185,14 +212,14 @@ private struct MatchRow: View {
 }
 
 struct NewMatchSheet: View {
-    @Environment(\.modelContext) private var context
+    @Environment(\.teamDataStore) private var store
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.teamSession) private var session
-    let players: [Player]
 
     @State private var opponent = ""
     @State private var date = Date()
     @State private var itemOfTheWeek = ""
+    @State private var busy = false
+    @State private var error: String?
     @FocusState private var opponentFocused: Bool
 
     var body: some View {
@@ -225,25 +252,25 @@ struct NewMatchSheet: View {
                         HStack {
                             SectionLabel(text: "Item of the week")
                             Spacer()
-                            Text("optional")
-                                .font(.system(size: 12))
-                                .foregroundStyle(Theme.textFaint)
+                            Text("optional").font(.system(size: 12)).foregroundStyle(Theme.textFaint)
                         }
                         TextField("", text: $itemOfTheWeek,
                                   prompt: Text("e.g. Traffic cone").foregroundStyle(Theme.textFaint))
                             .font(.system(size: 17, weight: .medium))
                             .foregroundStyle(Theme.beige)
                             .textInputAutocapitalization(.sentences)
-                            .submitLabel(.done)
                             .padding(16)
                             .cardSurface()
                             .onSubmit(save)
                     }
 
-                    Button("Start matchday", action: save)
+                    if let error {
+                        Text(error).font(.system(size: 13)).foregroundStyle(Color(hex: 0xFF6B6B))
+                    }
+
+                    Button(busy ? "Starting…" : "Start matchday", action: save)
                         .buttonStyle(AccentButtonStyle())
-                        .disabled(opponent.trimmingCharacters(in: .whitespaces).isEmpty)
-                        .padding(.top, 4)
+                        .disabled(busy || opponent.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
                 .padding(20)
             }
@@ -263,14 +290,21 @@ struct NewMatchSheet: View {
     private func save() {
         let name = opponent.trimmingCharacters(in: .whitespaces)
         guard !name.isEmpty else { return }
-        context.insert(Match(
-            opponent: name,
-            date: date,
-            itemOfTheWeek: itemOfTheWeek.trimmingCharacters(in: .whitespaces),
-            teamId: session.team?.id
-        ))
-        try? context.save()
-        Haptics.bump()
-        dismiss()
+        busy = true
+        error = nil
+        Task {
+            do {
+                _ = try await store.addMatch(
+                    opponent: name,
+                    playedOn: date,
+                    itemOfTheWeek: itemOfTheWeek.trimmingCharacters(in: .whitespaces)
+                )
+                Haptics.bump()
+                dismiss()
+            } catch {
+                self.error = error.localizedDescription
+            }
+            busy = false
+        }
     }
 }

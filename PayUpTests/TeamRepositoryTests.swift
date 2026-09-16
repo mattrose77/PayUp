@@ -15,10 +15,7 @@ final class TeamRepositoryTests: XCTestCase {
     private let stranger = "user-stranger"
 
     override func setUpWithError() throws {
-        let schema = Schema([
-            Player.self, FineType.self, Fine.self, Match.self,
-            Team.self, TeamMember.self
-        ])
+        let schema = Schema([Team.self, TeamMember.self])
         container = try ModelContainer(
             for: schema,
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
@@ -177,24 +174,36 @@ final class TeamRepositoryTests: XCTestCase {
         let team = try await makeTeam()
         try await repo.joinTeam(code: team.joinCode, userId: mate, displayName: "Sam")
 
-        let context = ModelContext(container)
-        let player = Player(name: "Jamie Vasey", teamId: team.id)
-        let type = FineType(name: "Late arrival", amountPence: 200, teamId: team.id)
-        let match = Match(opponent: "Grove", date: .now, teamId: team.id)
-        context.insert(player)
-        context.insert(type)
-        context.insert(match)
-        context.insert(Fine(player: player, fineType: type, match: match))
-        try context.save()
+        // The team's data lives in its own repositories now, not the team store.
+        let data = LocalStore()
+        let players = LocalPlayerRepository(store: data)
+        let types = LocalFineTypeRepository(store: data)
+        let matches = LocalMatchRepository(store: data)
+        let fines = LocalFineRepository(store: data)
+
+        let player = try await players.add(name: "Jamie Vasey", teamId: team.id)
+        let type = try await types.add(name: "Late arrival", amountPence: 200, sortOrder: 0, teamId: team.id)
+        let match = try await matches.add(
+            opponent: "Grove", playedOn: .now, itemOfTheWeek: "", teamId: team.id
+        )
+        _ = try await fines.add(FineDraft(
+            teamId: team.id, matchId: match.id, playerId: player.id,
+            fineTypeId: type.id, description: type.name,
+            amountPence: type.amountPence, createdBy: owner
+        ))
 
         let adminRoster = try await repo.members(of: team.id)
         let admin = try XCTUnwrap(adminRoster.first { $0.role == .admin })
         try await repo.removeMember(admin.id, by: owner)
 
-        XCTAssertEqual(try context.fetch(FetchDescriptor<Player>()).count, 1)
-        XCTAssertEqual(try context.fetch(FetchDescriptor<Match>()).count, 1)
-        XCTAssertEqual(try context.fetch(FetchDescriptor<Fine>()).count, 1)
-        XCTAssertEqual(try context.fetch(FetchDescriptor<FineType>()).count, 1)
+        let remainingPlayers = try await players.players(teamId: team.id)
+        let remainingTypes = try await types.fineTypes(teamId: team.id)
+        let remainingMatches = try await matches.matches(teamId: team.id)
+        let remainingFines = try await fines.fines(teamId: team.id)
+        XCTAssertEqual(remainingPlayers.count, 1)
+        XCTAssertEqual(remainingTypes.count, 1)
+        XCTAssertEqual(remainingMatches.count, 1)
+        XCTAssertEqual(remainingFines.count, 1)
     }
 
     // MARK: - Join code lifecycle

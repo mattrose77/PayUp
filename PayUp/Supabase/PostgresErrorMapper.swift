@@ -20,6 +20,14 @@ enum PostgresErrorMapper {
         // throws the same thing when a non-owner tries an owner-only action.
         if token.contains("not_owner") { return .notAuthorised }
 
+        // 23503 is a foreign key violation. The only restrict-on-delete in the
+        // schema is fines -> players, so this is always "they have history".
+        if token.contains("23503")
+            || token.contains("foreign key")
+            || token.contains("violates foreign key constraint") {
+            return .playerHasFines
+        }
+
         return .serverRejected(message)
     }
 

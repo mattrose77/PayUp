@@ -1,136 +1,145 @@
 import SwiftUI
-import SwiftData
 
 /// The matchday tally. Optimised for one thing: logging a lot of fines fast.
 /// Pick a chip once, then tap every player it applies to.
-///
-/// Once the matchday is marked complete the screen becomes a read-only summary:
-/// no chips, no undo, and rows lead to the player rather than issuing a fine.
 struct TallyView: View {
-    @Environment(\.modelContext) private var context
-    @Bindable var match: Match
+    @Environment(\.teamDataStore) private var store
+    let matchId: UUID
 
-    @Environment(\.teamSession) private var session
-    @Query(sort: [SortDescriptor(\Player.name)]) private var allPlayers: [Player]
-    @Query(filter: #Predicate<FineType> { !$0.isArchived },
-           sort: [SortDescriptor(\FineType.sortOrder)]) private var allFineTypes: [FineType]
-
-    private var players: [Player] { allPlayers.scoped(to: session.team?.id) }
-    private var fineTypes: [FineType] { allFineTypes.scoped(to: session.team?.id) }
-
-    @State private var selectedType: FineType?
+    @State private var selectedTypeId: UUID?
     @State private var recent: [Fine] = []
-    @State private var flashed: PersistentIdentifier?
+    @State private var flashed: UUID?
     @State private var inspecting: Player?
     @State private var sharing = false
+    @State private var busy = false
+    @State private var error: String?
 
-    @AppStorage(Club.storageKey) private var clubName = ""
-    @AppStorage(Club.closingKey) private var closingLine = Club.defaultClosing
+    private var match: Match? { store.match(matchId) }
+    private var players: [Player] { store.activePlayers }
+    private var fineTypes: [FineType] { store.activeFineTypes }
+    private var matchFines: [Fine] { store.fines(forMatch: matchId) }
 
     var body: some View {
+        Group {
+            if let match {
+                content(for: match)
+            } else {
+                // The match was deleted on the other member's device.
+                EmptyStateView(
+                    icon: "questionmark.folder",
+                    title: "Matchday not found",
+                    message: "This matchday no longer exists — it may have been deleted."
+                )
+                .padding(18)
+            }
+        }
+        .screenBackground()
+        .toolbar(.hidden, for: .tabBar)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar { toolbarContent }
+        .navigationDestination(item: $inspecting) { player in
+            PlayerDetailView(playerId: player.id).environment(\.teamDataStore, store)
+        }
+        .sheet(isPresented: $sharing) { shareSheet }
+        .onAppear {
+            if selectedTypeId == nil { selectedTypeId = fineTypes.first?.id }
+            if recent.isEmpty {
+                recent = matchFines.sorted { $0.createdAt > $1.createdAt }.prefix(12).map { $0 }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func content(for match: Match) -> some View {
         VStack(spacing: 0) {
-            if !match.isComplete {
+            if !match.isComplete && !fineTypes.isEmpty && !players.isEmpty {
                 chipRow
                 Divider().overlay(Theme.surfaceHi)
             }
 
-            if players.isEmpty {
-                EmptyHint(
-                    icon: "person.2",
-                    title: "No squad yet",
-                    message: "Add players in the Squad tab, then come back to start fining."
-                )
-                Spacer()
-            } else {
-                ScrollView {
-                    LazyVStack(spacing: 6) {
-                        statusCard
+            ScrollView {
+                LazyVStack(spacing: 6) {
+                    statusCard(for: match)
+                    itemOfTheWeekStrip(for: match)
 
-                        itemOfTheWeekStrip
+                    if let error {
+                        Text(error)
+                            .font(.system(size: 13))
+                            .foregroundStyle(Color(hex: 0xFF6B6B))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 4)
+                    }
 
-                        if match.isComplete {
-                            completedRoster
-                        } else {
-                            ForEach(players) { player in
-                                PlayerTallyRow(
-                                    player: player,
-                                    match: match,
-                                    flashing: flashed == player.persistentModelID
-                                )
-                                .contentShape(Rectangle())
-                                .onTapGesture { apply(to: player) }
-                                .contextMenu {
-                                    NavigationLink { PlayerDetailView(player: player) } label: {
-                                        Label("Player detail", systemImage: "person.text.rectangle")
-                                    }
-                                    Button(role: .destructive) { undoLast(for: player) } label: {
-                                        Label("Undo last fine", systemImage: "arrow.uturn.backward")
-                                    }
+                    if players.isEmpty {
+                        EmptyStateView(
+                            icon: "person.2",
+                            title: "No active players",
+                            message: "Everyone who could be fined is inactive or hasn't been added yet. Add your squad in the Squad tab."
+                        )
+                    } else if fineTypes.isEmpty && !match.isComplete {
+                        EmptyStateView(
+                            icon: "sterlingsign.circle",
+                            title: "No fines to give",
+                            message: "You've got a squad but nothing to fine them for. Build your fines list in the Fines tab, then come back."
+                        )
+                    } else if match.isComplete {
+                        completedRoster
+                    } else {
+                        ForEach(players) { player in
+                            PlayerTallyRow(
+                                player: player,
+                                fines: store.fines(forMatch: matchId, player: player.id),
+                                flashing: flashed == player.id
+                            )
+                            .contentShape(Rectangle())
+                            .onTapGesture { apply(to: player, match: match) }
+                            .contextMenu {
+                                Button { inspecting = player } label: {
+                                    Label("Player detail", systemImage: "person.text.rectangle")
+                                }
+                                Button(role: .destructive) { undoLast(for: player) } label: {
+                                    Label("Undo last fine", systemImage: "arrow.uturn.backward")
                                 }
                             }
                         }
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.top, 12)
-                    .padding(.bottom, 20)
                 }
+                .padding(.horizontal, 16)
+                .padding(.top, 12)
+                .padding(.bottom, 20)
             }
+            .refreshable { await store.refresh() }
 
             if !match.isComplete { undoStrip }
         }
-        .screenBackground()
-        .navigationDestination(item: $inspecting) { player in
-            PlayerDetailView(player: player)
-        }
-        .sheet(isPresented: $sharing) {
-            let club = clubName.trimmingCharacters(in: .whitespaces).isEmpty
-                ? Club.fallbackName : clubName
-            ShareSheet(
-                title: match.opponent,
-                card: ShareCard(
-                    clubName: club,
-                    subtitle: "v \(match.opponent) — \(ShareSummary.dateString(match.date))",
-                    rows: ShareSummary.matchdayTallies(match: match, players: players),
-                    bigLabel: "today's damage",
-                    bigAmount: Money.string(match.total),
-                    closing: closingLine
-                ),
-                filename: "payup-\(match.opponent.replacingOccurrences(of: " ", with: "-").lowercased()).png"
-            )
-        }
-        .toolbar(.hidden, for: .tabBar)
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .principal) {
-                VStack(spacing: 1) {
-                    Text(match.opponent)
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(Theme.beige)
-                    Text(match.date, format: .dateTime.weekday(.abbreviated).day().month(.abbreviated))
+    }
+
+    @ToolbarContentBuilder
+    private var toolbarContent: some ToolbarContent {
+        ToolbarItem(placement: .principal) {
+            VStack(spacing: 1) {
+                Text(match?.opponent ?? "")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(Theme.beige)
+                if let match {
+                    Text(match.playedOn, format: .dateTime.weekday(.abbreviated).day().month(.abbreviated))
                         .font(.system(size: 11))
                         .foregroundStyle(Theme.textDim)
                 }
             }
-            ToolbarItemGroup(placement: .topBarTrailing) {
-                Text(Money.string(match.total))
-                    .font(.tally(18, .bold))
-                    .foregroundStyle(match.total > 0 ? Theme.accent : Theme.textFaint)
-                    .contentTransition(.numericText())
-                    .animation(.snappy(duration: 0.25), value: match.total)
-
-                Button { sharing = true } label: {
-                    Image(systemName: "square.and.arrow.up")
-                        .font(.system(size: 15, weight: .semibold))
-                }
-                .disabled(match.fines.isEmpty)
-            }
         }
-        .onAppear {
-            if selectedType == nil { selectedType = fineTypes.first }
-            recent = recent.filter { $0.modelContext != nil }
-            if recent.isEmpty {
-                recent = match.fines.sorted { $0.createdAt > $1.createdAt }.prefix(12).map { $0 }
+        ToolbarItemGroup(placement: .topBarTrailing) {
+            Text(Money.string(matchFines.totalPence))
+                .font(.tally(18, .bold))
+                .foregroundStyle(matchFines.isEmpty ? Theme.textFaint : Theme.accent)
+                .contentTransition(.numericText())
+                .animation(.snappy(duration: 0.25), value: matchFines.totalPence)
+
+            Button { sharing = true } label: {
+                Image(systemName: "square.and.arrow.up")
+                    .font(.system(size: 15, weight: .semibold))
             }
+            .disabled(matchFines.isEmpty)
         }
     }
 
@@ -143,13 +152,13 @@ struct TallyView: View {
                     ForEach(fineTypes) { type in
                         FineChip(
                             type: type,
-                            selected: selectedType?.persistentModelID == type.persistentModelID,
-                            countToday: countToday(type)
+                            selected: selectedTypeId == type.id,
+                            countToday: matchFines.count { $0.fineTypeId == type.id }
                         )
-                        .id(type.persistentModelID)
+                        .id(type.id)
                         .onTapGesture {
                             Haptics.tap()
-                            withAnimation(.snappy(duration: 0.18)) { selectedType = type }
+                            withAnimation(.snappy(duration: 0.18)) { selectedTypeId = type.id }
                         }
                     }
                 }
@@ -157,16 +166,14 @@ struct TallyView: View {
             }
             .contentMargins(.horizontal, 16, for: .scrollContent)
             .background(Theme.bg)
-            .onChange(of: selectedType?.persistentModelID) { _, id in
+            .onChange(of: selectedTypeId) { _, id in
                 guard let id else { return }
-                withAnimation(.snappy(duration: 0.25)) {
-                    proxy.scrollTo(id, anchor: .leading)
-                }
+                withAnimation(.snappy(duration: 0.25)) { proxy.scrollTo(id, anchor: .leading) }
             }
         }
     }
 
-    private var itemOfTheWeekStrip: some View {
+    private func itemOfTheWeekStrip(for match: Match) -> some View {
         HStack(spacing: 10) {
             Image(systemName: "shippingbox.fill")
                 .font(.system(size: 12))
@@ -187,7 +194,7 @@ struct TallyView: View {
 
     // MARK: - Complete / reopen
 
-    private var statusCard: some View {
+    private func statusCard(for match: Match) -> some View {
         HStack(spacing: 11) {
             Image(systemName: match.isComplete ? "lock.fill" : "lock.open")
                 .font(.system(size: 13))
@@ -197,17 +204,15 @@ struct TallyView: View {
                 Text(match.isComplete ? "Matchday complete" : "Matchday open")
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(Theme.beige)
-                Text(statusDetail)
+                Text(statusDetail(for: match))
                     .font(.system(size: 12))
                     .foregroundStyle(Theme.textDim)
             }
 
             Spacer(minLength: 8)
 
-            // Quiet while open so it doesn't compete with tapping players;
-            // accent once locked, when it's the only thing left to do here.
-            Button(action: match.isComplete ? reopen : complete) {
-                Text(match.isComplete ? "Reopen" : "Complete")
+            Button { setComplete(!match.isComplete, match: match) } label: {
+                Text(busy ? "…" : (match.isComplete ? "Reopen" : "Complete"))
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(match.isComplete ? Theme.bg : Theme.beige)
                     .padding(.horizontal, 14)
@@ -215,43 +220,40 @@ struct TallyView: View {
                     .background(match.isComplete ? Theme.accent : Theme.surfaceHi, in: Capsule())
             }
             .buttonStyle(.plain)
+            .disabled(busy)
         }
         .padding(14)
         .cardSurface()
         .padding(.bottom, 4)
     }
 
-    private var statusDetail: String {
+    private func statusDetail(for match: Match) -> String {
         if match.isComplete {
             return match.completedAt.map {
                 "Locked \($0.formatted(.dateTime.day().month(.abbreviated)))"
             } ?? "No more fines can be added"
         }
-        let count = match.fines.count
+        let count = matchFines.count
         return count == 0 ? "No fines yet" : "\(count) fine\(count == 1 ? "" : "s") so far"
     }
 
-    /// Read-only receipt: only the players who actually picked something up,
-    /// heaviest first. Tapping opens the player rather than issuing a fine.
     @ViewBuilder
     private var completedRoster: some View {
         let fined = players
-            .filter { total(for: $0) > 0 }
-            .sorted { total(for: $0) > total(for: $1) }
+            .map { ($0, store.fines(forMatch: matchId, player: $0.id)) }
+            .filter { !$0.1.isEmpty }
+            .sorted { $0.1.totalPence > $1.1.totalPence }
 
         if fined.isEmpty {
-            EmptyHint(
+            EmptyStateView(
                 icon: "checkmark.seal",
                 title: "Nobody got done",
                 message: "This matchday was locked with no fines on the board."
             )
-            .cardSurface(Theme.Radius.card)
         } else {
-            ForEach(fined) { player in
-                Button {
-                    inspecting = player
-                } label: {
-                    PlayerTallyRow(player: player, match: match, flashing: false)
+            ForEach(fined, id: \.0.id) { player, fines in
+                Button { inspecting = player } label: {
+                    PlayerTallyRow(player: player, fines: fines, flashing: false)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -275,8 +277,8 @@ struct TallyView: View {
                                 .tracking(1.1)
                                 .foregroundStyle(Theme.textFaint)
                                 .padding(.trailing, 2)
-                            ForEach(recent.prefix(6), id: \.persistentModelID) { fine in
-                                UndoPill(fine: fine)
+                            ForEach(recent.prefix(6)) { fine in
+                                UndoPill(fine: fine, playerName: store.player(fine.playerId)?.name)
                                     .onTapGesture { undo(fine) }
                             }
                         }
@@ -290,72 +292,85 @@ struct TallyView: View {
         }
     }
 
+    private var shareSheet: some View {
+        let club = UserDefaults.standard.string(forKey: Club.storageKey) ?? Club.fallbackName
+        let closing = UserDefaults.standard.string(forKey: Club.closingKey) ?? Club.defaultClosing
+        let current = match
+        return ShareSheet(
+            title: current?.opponent ?? "Matchday",
+            card: ShareCard(
+                clubName: club,
+                subtitle: current.map { "v \($0.opponent) — \(ShareSummary.dateString($0.playedOn))" } ?? "",
+                rows: ShareSummary.matchdayTallies(fines: matchFines, players: players),
+                bigLabel: "today's damage",
+                bigAmount: Money.string(matchFines.totalPence),
+                closing: closing
+            ),
+            filename: "payup-\((current?.opponent ?? "matchday").replacingOccurrences(of: " ", with: "-").lowercased()).png"
+        )
+    }
+
     // MARK: - Actions
 
-    private func apply(to player: Player) {
-        guard !match.isComplete, let type = selectedType else { return }
-        let fine = Fine(player: player, fineType: type, match: match)
-        context.insert(fine)
-        try? context.save()
-
+    private func apply(to player: Player, match: Match) {
+        guard !match.isComplete,
+              let typeId = selectedTypeId,
+              let type = fineTypes.first(where: { $0.id == typeId }) else { return }
+        error = nil
         Haptics.tap()
-        withAnimation(.snappy(duration: 0.2)) {
-            recent.insert(fine, at: 0)
-            if recent.count > 12 { recent.removeLast(recent.count - 12) }
-            flashed = player.persistentModelID
-        }
+        withAnimation(.snappy(duration: 0.2)) { flashed = player.id }
+
         Task {
+            do {
+                let fine = try await store.addFine(player: player, type: type, match: match)
+                withAnimation(.snappy(duration: 0.2)) {
+                    recent.insert(fine, at: 0)
+                    if recent.count > 12 { recent.removeLast(recent.count - 12) }
+                }
+            } catch {
+                self.error = error.localizedDescription
+            }
             try? await Task.sleep(for: .milliseconds(320))
-            if flashed == player.persistentModelID {
+            if flashed == player.id {
                 withAnimation(.easeOut(duration: 0.2)) { flashed = nil }
             }
         }
     }
 
     private func undo(_ fine: Fine) {
-        withAnimation(.snappy(duration: 0.2)) {
-            recent.removeAll { $0.persistentModelID == fine.persistentModelID }
+        error = nil
+        Task {
+            do {
+                try await store.deleteFine(fine)
+                withAnimation(.snappy(duration: 0.2)) {
+                    recent.removeAll { $0.id == fine.id }
+                }
+                Haptics.bump()
+            } catch {
+                self.error = error.localizedDescription
+            }
         }
-        guard fine.modelContext != nil else { return }
-        context.delete(fine)
-        try? context.save()
-        Haptics.bump()
     }
 
     private func undoLast(for player: Player) {
-        let todays = match.fines
-            .filter { $0.player?.persistentModelID == player.persistentModelID }
+        let theirs = store.fines(forMatch: matchId, player: player.id)
             .sorted { $0.createdAt > $1.createdAt }
-        if let last = todays.first { undo(last) }
+        if let last = theirs.first { undo(last) }
     }
 
-    private func complete() {
-        withAnimation(.snappy(duration: 0.3)) {
-            match.isComplete = true
-            match.completedAt = Date()
-            recent.removeAll()
+    private func setComplete(_ complete: Bool, match: Match) {
+        busy = true
+        error = nil
+        Task {
+            do {
+                try await store.setMatchComplete(match, complete: complete)
+                if complete { recent.removeAll() }
+                Haptics.bump()
+            } catch {
+                self.error = error.localizedDescription
+            }
+            busy = false
         }
-        try? context.save()
-        Haptics.bump()
-    }
-
-    private func reopen() {
-        withAnimation(.snappy(duration: 0.3)) {
-            match.isComplete = false
-            match.completedAt = nil
-        }
-        try? context.save()
-        Haptics.bump()
-    }
-
-    private func countToday(_ type: FineType) -> Int {
-        match.fines.count { $0.fineType?.persistentModelID == type.persistentModelID }
-    }
-
-    private func total(for player: Player) -> Int {
-        match.fines
-            .filter { $0.player?.persistentModelID == player.persistentModelID }
-            .reduce(0) { $0 + $1.amountPence }
     }
 }
 
@@ -396,40 +411,31 @@ private struct FineChip: View {
 
 private struct PlayerTallyRow: View {
     let player: Player
-    let match: Match
+    let fines: [Fine]
     let flashing: Bool
 
-    private var todays: [Fine] {
-        match.fines
-            .filter { $0.player?.persistentModelID == player.persistentModelID }
-            .sorted { $0.createdAt < $1.createdAt }
-    }
-
-    private var todayTotal: Int { todays.reduce(0) { $0 + $1.amountPence } }
-
-    /// "Late arrival ×2" style summary, most recent first.
+    /// Reads each fine's own description — never joins back to fine_types,
+    /// which may have been deleted.
     private var summary: [(String, Int)] {
         var order: [String] = []
         var counts: [String: Int] = [:]
-        for fine in todays.reversed() {
-            if counts[fine.label] == nil { order.append(fine.label) }
-            counts[fine.label, default: 0] += 1
+        for fine in fines.sorted(by: { $0.createdAt > $1.createdAt }) {
+            if counts[fine.description] == nil { order.append(fine.description) }
+            counts[fine.description, default: 0] += 1
         }
         return order.map { ($0, counts[$0] ?? 0) }
     }
 
     var body: some View {
         HStack(spacing: 13) {
-            Avatar(initials: player.initials, size: 38, highlighted: !todays.isEmpty)
+            Avatar(initials: player.initials, size: 38, highlighted: !fines.isEmpty)
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(player.name)
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(Theme.beige)
                 if summary.isEmpty {
-                    Text("Clean")
-                        .font(.system(size: 12))
-                        .foregroundStyle(Theme.textFaint)
+                    Text("Clean").font(.system(size: 12)).foregroundStyle(Theme.textFaint)
                 } else {
                     Text(summary.map { $0.1 > 1 ? "\($0.0) ×\($0.1)" : $0.0 }.joined(separator: " · "))
                         .font(.system(size: 12))
@@ -441,11 +447,11 @@ private struct PlayerTallyRow: View {
 
             Spacer(minLength: 6)
 
-            Text(Money.string(todayTotal))
+            Text(Money.string(fines.totalPence))
                 .font(.tally(19, .bold))
-                .foregroundStyle(todayTotal > 0 ? Theme.accent : Theme.textFaint)
+                .foregroundStyle(fines.isEmpty ? Theme.textFaint : Theme.accent)
                 .contentTransition(.numericText())
-                .animation(.snappy(duration: 0.25), value: todayTotal)
+                .animation(.snappy(duration: 0.25), value: fines.totalPence)
         }
         .padding(.horizontal, 13)
         .padding(.vertical, 9)
@@ -463,14 +469,15 @@ private struct PlayerTallyRow: View {
 
 private struct UndoPill: View {
     let fine: Fine
+    let playerName: String?
 
     var body: some View {
         HStack(spacing: 6) {
             Image(systemName: "arrow.uturn.backward")
                 .font(.system(size: 10, weight: .bold))
-            Text(fine.player?.name.split(separator: " ").first.map(String.init) ?? "—")
+            Text(playerName?.split(separator: " ").first.map(String.init) ?? "—")
                 .font(.system(size: 13, weight: .semibold))
-            Text(fine.label)
+            Text(fine.description)
                 .font(.system(size: 13))
                 .foregroundStyle(Theme.textDim)
                 .lineLimit(1)

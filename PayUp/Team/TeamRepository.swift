@@ -11,6 +11,8 @@ enum TeamError: LocalizedError, Equatable {
     /// Anything the server rejected that this client doesn't recognise. Keeps a
     /// new server-side rule from crashing an old build.
     case serverRejected(String)
+    /// The player has fine history and the FK is `on delete restrict`.
+    case playerHasFines
 
     var errorDescription: String? {
         switch self {
@@ -24,6 +26,8 @@ enum TeamError: LocalizedError, Equatable {
             return "You don't have permission to do that."
         case .ownerCannotLeave:
             return "The owner can't leave their own team."
+        case .playerHasFines:
+            return "This player has fines on record, so they can't be deleted. Make them inactive instead — their history and any unpaid balance stay put."
         case .serverRejected(let message):
             return message
         case .teamLimitReached(let limit):
@@ -197,15 +201,8 @@ struct LocalTeamRepository: TeamRepository {
             throw TeamError.notAuthorised
         }
         for member in roster { context.delete(member) }
-        for player in try context.fetch(FetchDescriptor<Player>()).scoped(to: teamId) {
-            context.delete(player)
-        }
-        for match in try context.fetch(FetchDescriptor<Match>()).scoped(to: teamId) {
-            context.delete(match)
-        }
-        for type in try context.fetch(FetchDescriptor<FineType>()).scoped(to: teamId) {
-            context.delete(type)
-        }
+        // Players, matches, fine types and fines live in Postgres and cascade
+        // from the team row there.
         if let team = try team(teamId) { context.delete(team) }
         try context.save()
     }

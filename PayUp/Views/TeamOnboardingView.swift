@@ -4,6 +4,7 @@ import SwiftUI
 struct TeamOnboardingView: View {
     enum Mode: Hashable { case create, join }
 
+    let auth: AuthService
     @Environment(\.teamSession) private var session
 
     @State private var mode: Mode?
@@ -35,6 +36,15 @@ struct TeamOnboardingView: View {
                 case .join:
                     joinForm
                 }
+
+                // Without this there's no way off this screen for someone
+                // signed in to the wrong account — and a Supabase session
+                // outlives an app uninstall, so it happens.
+                Button("Sign out") { Task { await auth.signOut() } }
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(Theme.textDim)
+                    .frame(maxWidth: .infinity)
+                    .padding(.top, 8)
             }
             .padding(20)
         }

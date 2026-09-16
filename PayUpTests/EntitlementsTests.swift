@@ -17,10 +17,7 @@ final class EntitlementsTests: XCTestCase {
     private let mate = "user-mate"
 
     override func setUpWithError() throws {
-        let schema = Schema([
-            Player.self, FineType.self, Fine.self, Match.self,
-            Team.self, TeamMember.self
-        ])
+        let schema = Schema([Team.self, TeamMember.self])
         container = try ModelContainer(
             for: schema,
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)

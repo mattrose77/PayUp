@@ -7,10 +7,27 @@ private struct TeamSessionKey: @preconcurrency EnvironmentKey {
     static let defaultValue = TeamSession(repository: UnavailableTeamRepository(), userId: "")
 }
 
+private struct TeamDataStoreKey: @preconcurrency EnvironmentKey {
+    /// Placeholder only — the real store is injected once a team resolves.
+    @MainActor
+    static let defaultValue = TeamDataStore(
+        teamId: UUID(), userId: "",
+        players: LocalPlayerRepository(store: LocalStore()),
+        fineTypes: LocalFineTypeRepository(store: LocalStore()),
+        matches: LocalMatchRepository(store: LocalStore()),
+        fines: LocalFineRepository(store: LocalStore())
+    )
+}
+
 extension EnvironmentValues {
     var teamSession: TeamSession {
         get { self[TeamSessionKey.self] }
         set { self[TeamSessionKey.self] = newValue }
+    }
+
+    var teamDataStore: TeamDataStore {
+        get { self[TeamDataStoreKey.self] }
+        set { self[TeamDataStoreKey.self] = newValue }
     }
 }
 
@@ -19,6 +36,7 @@ struct RootView: View {
 
     @State private var auth = AuthService(client: SupabaseClientProvider.shared)
     @State private var session: TeamSession?
+    @State private var dataStore: TeamDataStore?
     @State private var showSplash = true
 
     var body: some View {
@@ -31,7 +49,6 @@ struct RootView: View {
             }
         }
         .task {
-            LaunchMigration.migrateMoneyToPence(context)
             await auth.restore()
             await buildSessionIfNeeded()
             try? await Task.sleep(for: .milliseconds(1200))
@@ -57,9 +74,12 @@ struct RootView: View {
             if let session, session.hasLoaded {
                 Group {
                     if session.team == nil {
-                        TeamOnboardingView()
-                    } else {
+                        TeamOnboardingView(auth: auth)
+                    } else if let dataStore {
                         MainTabView(auth: auth)
+                            .environment(\.teamDataStore, dataStore)
+                    } else {
+                        loading
                     }
                 }
                 .environment(\.teamSession, session)
@@ -80,25 +100,40 @@ struct RootView: View {
         guard case .signedIn(let userId, _) = auth.state else {
             session?.signedOut()
             session = nil
+            dataStore = nil
             return
         }
 
         if session == nil {
             let repository = SupabaseTeamRepository(client: SupabaseClientProvider.shared)
             let built = TeamSession(repository: repository, userId: userId)
-            built.onTeamCreated = { team in
-                SeedData.seedFines(for: team.id, in: context)
-            }
+            // Nothing is seeded: every club's fines list differs, and a wrong
+            // default is worse than an empty list with a good empty state.
             session = built
         } else {
             session?.adopt(userId: userId)
         }
 
         await session?.refresh()
-        if let teamId = session?.team?.id {
-            // Local players/matches/fines predate teams; attach them once we know
-            // which team this account belongs to.
-            LaunchMigration.adoptOrphans(context, into: teamId)
+        rebuildDataStore(userId: userId)
+    }
+
+    /// A fresh store per team — never reuse one across accounts or teams.
+    private func rebuildDataStore(userId: String) {
+        guard let teamId = session?.team?.id else {
+            dataStore = nil
+            return
+        }
+        if dataStore == nil {
+            let client = SupabaseClientProvider.shared
+            dataStore = TeamDataStore(
+                teamId: teamId,
+                userId: userId,
+                players: SupabasePlayerRepository(client: client),
+                fineTypes: SupabaseFineTypeRepository(client: client),
+                matches: SupabaseMatchRepository(client: client),
+                fines: SupabaseFineRepository(client: client)
+            )
         }
     }
 }

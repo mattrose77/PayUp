@@ -27,13 +27,14 @@ enum ShareSummary {
         date.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated))
     }
 
-    /// Repeats collapse into "×N" rather than being listed twice.
+    /// Repeats collapse into "×N" rather than being listed twice. Reads each
+    /// fine's own description — the fine type may since have been deleted.
     static func fineLabels(_ fines: [Fine]) -> [String] {
         var order: [String] = []
         var counts: [String: Int] = [:]
         for fine in fines.sorted(by: { $0.createdAt < $1.createdAt }) {
-            if counts[fine.label] == nil { order.append(fine.label) }
-            counts[fine.label, default: 0] += 1
+            if counts[fine.description] == nil { order.append(fine.description) }
+            counts[fine.description, default: 0] += 1
         }
         return order.map { label in
             let n = counts[label] ?? 1
@@ -75,32 +76,16 @@ enum ShareSummary {
         return lines
     }
 
-    static func matchdayTallies(match: Match, players: [Player]) -> [Tally] {
+    static func matchdayTallies(fines: [Fine], players: [Player]) -> [Tally] {
         players.compactMap { player in
-            let mine = match.fines.filter { $0.player?.persistentModelID == player.persistentModelID }
+            let mine = fines.filter { $0.playerId == player.id }
             guard !mine.isEmpty else { return nil }
             return Tally(
                 name: player.name,
                 details: fineLabels(mine),
-                amountPence: mine.reduce(0) { $0 + $1.amountPence }
+                amountPence: mine.totalPence
             )
         }
         .sorted { $0.amountPence > $1.amountPence }
-    }
-
-    static func seasonPodium(_ players: [Player]) -> [Tally] {
-        players.filter { !$0.fines.isEmpty }
-            .sorted {
-                if $0.totalFined != $1.totalFined { return $0.totalFined > $1.totalFined }
-                return $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
-            }
-            .prefix(3)
-            .map { player in
-                Tally(
-                    name: player.name,
-                    details: ["\(player.fines.count) fine\(player.fines.count == 1 ? "" : "s")"],
-                    amountPence: player.totalFined
-                )
-            }
     }
 }

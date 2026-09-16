@@ -6,10 +6,8 @@ struct PayUpApp: App {
     let container: ModelContainer
 
     init() {
-        let schema = Schema([
-            Player.self, FineType.self, Fine.self, Match.self,
-            Team.self, TeamMember.self
-        ])
+        // Only the team layer is local now; everything else lives in Supabase.
+        let schema = Schema([Team.self, TeamMember.self])
         do {
             container = try ModelContainer(for: schema)
         } catch {

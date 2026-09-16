@@ -1,43 +1,40 @@
 import SwiftUI
-import SwiftData
 
 struct ShameBoardView: View {
-    @Environment(\.teamSession) private var session
-    @Query(sort: [SortDescriptor(\Player.name)]) private var allPlayers: [Player]
-    @Query private var everyFine: [Fine]
-    @Query private var allMatches: [Match]
-
-    private var players: [Player] { allPlayers.scoped(to: session.team?.id) }
-    private var allFines: [Fine] { everyFine.scoped(to: session.team?.id) }
-    private var matches: [Match] { allMatches.scoped(to: session.team?.id) }
-    @AppStorage(Club.storageKey) private var clubName = ""
-    @AppStorage(Club.closingKey) private var closingLine = Club.defaultClosing
-
+    @Environment(\.teamDataStore) private var store
     @State private var sharing = false
 
-    private var ranked: [Player] {
-        players.filter { !$0.fines.isEmpty }
+    private struct Standing: Identifiable {
+        let player: Player
+        let fines: [Fine]
+        var id: UUID { player.id }
+    }
+
+    private var standings: [Standing] {
+        store.players
+            .map { Standing(player: $0, fines: store.fines(forPlayer: $0.id)) }
+            .filter { !$0.fines.isEmpty }
             .sorted {
-                if $0.totalFined != $1.totalFined { return $0.totalFined > $1.totalFined }
-                return $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+                if $0.fines.totalPence != $1.fines.totalPence {
+                    return $0.fines.totalPence > $1.fines.totalPence
+                }
+                return $0.player.name.localizedCaseInsensitiveCompare($1.player.name) == .orderedAscending
             }
     }
 
-    private var biggestOffender: Player? { ranked.first }
-
-    private var cleanest: (player: Player, tiedWith: Int)? {
-        guard let best = players.min(by: {
-            if $0.totalFined != $1.totalFined { return $0.totalFined < $1.totalFined }
-            if $0.fines.count != $1.fines.count { return $0.fines.count < $1.fines.count }
-            return $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+    private var cleanest: (player: Player, tied: Int)? {
+        let candidates = store.players.map { ($0, store.fines(forPlayer: $0.id).totalPence) }
+        guard let best = candidates.min(by: {
+            if $0.1 != $1.1 { return $0.1 < $1.1 }
+            return $0.0.name.localizedCaseInsensitiveCompare($1.0.name) == .orderedAscending
         }) else { return nil }
-        let tied = players.count { $0.totalFined == best.totalFined } - 1
-        return (best, tied)
+        let tied = candidates.count { $0.1 == best.1 } - 1
+        return (best.0, tied)
     }
 
-    private var mostCommonFine: (label: String, count: Int)? {
+    private var mostCommon: (label: String, count: Int)? {
         var counts: [String: Int] = [:]
-        for fine in allFines { counts[fine.label, default: 0] += 1 }
+        for fine in store.fines { counts[fine.description, default: 0] += 1 }
         return counts.max {
             if $0.value != $1.value { return $0.value < $1.value }
             return $0.key.localizedCaseInsensitiveCompare($1.key) == .orderedDescending
@@ -49,55 +46,50 @@ struct ShameBoardView: View {
             ScrollView {
                 VStack(spacing: 14) {
                     ScreenHeader(title: "Shame board", subtitle: "Season standings") {
-                        HeaderIconButton(systemName: "square.and.arrow.up") { sharing = true }
-                            .disabled(allFines.isEmpty)
-                            .opacity(allFines.isEmpty ? 0.35 : 1)
+                        if !store.fines.isEmpty {
+                            HeaderIconButton(systemName: "square.and.arrow.up") { sharing = true }
+                        }
                     }
 
-                    if allFines.isEmpty {
-                        EmptyHint(
-                            icon: "flame",
-                            title: "Nothing to see here",
-                            message: "The shame board fills up once fines start landing."
-                        )
-                        .cardSurface(Theme.Radius.card)
-                    } else {
-                        if let offender = biggestOffender {
-                            offenderCard(offender)
-                        }
+                    DataStateContainer(state: store.state, retry: { await store.refresh() }) {
+                        if store.fines.isEmpty {
+                            EmptyStateView(
+                                icon: "flame",
+                                title: "Nothing to see here",
+                                message: "The shame board fills up once fines start landing. Log a matchday and the table builds itself."
+                            )
+                        } else {
+                            if let top = standings.first { offenderCard(top) }
 
-                        HStack(spacing: 12) {
-                            if let common = mostCommonFine {
-                                smallCard(
-                                    icon: "repeat",
-                                    label: "Most common",
-                                    value: common.label,
-                                    detail: "\(common.count)×"
-                                )
-                            }
-                            if let clean = cleanest {
-                                smallCard(
-                                    icon: "sparkles",
-                                    label: "Cleanest",
-                                    value: clean.player.name,
-                                    detail: clean.tiedWith > 0
-                                        ? "\(Money.string(clean.player.totalFined)) · \(clean.tiedWith) tied"
-                                        : Money.string(clean.player.totalFined)
-                                )
-                            }
-                        }
-
-                        VStack(alignment: .leading, spacing: 8) {
-                            SectionLabel(text: "The table")
-                                .padding(.horizontal, 4)
-                                .padding(.top, 6)
-                            ForEach(Array(ranked.enumerated()), id: \.element.persistentModelID) { index, player in
-                                NavigationLink {
-                                    PlayerDetailView(player: player)
-                                } label: {
-                                    rankRow(index: index, player: player)
+                            HStack(spacing: 12) {
+                                if let common = mostCommon {
+                                    smallCard(icon: "repeat", label: "Most common",
+                                              value: common.label, detail: "\(common.count)×")
                                 }
-                                .buttonStyle(.plain)
+                                if let clean = cleanest {
+                                    smallCard(
+                                        icon: "sparkles", label: "Cleanest",
+                                        value: clean.player.name,
+                                        detail: clean.tied > 0
+                                            ? "\(Money.string(store.fines(forPlayer: clean.player.id).totalPence)) · \(clean.tied) tied"
+                                            : Money.string(store.fines(forPlayer: clean.player.id).totalPence)
+                                    )
+                                }
+                            }
+
+                            VStack(alignment: .leading, spacing: 8) {
+                                SectionLabel(text: "The table")
+                                    .padding(.horizontal, 4)
+                                    .padding(.top, 6)
+                                ForEach(Array(standings.enumerated()), id: \.element.id) { index, standing in
+                                    NavigationLink {
+                                        PlayerDetailView(playerId: standing.player.id)
+                                            .environment(\.teamDataStore, store)
+                                    } label: {
+                                        rankRow(index: index, standing: standing)
+                                    }
+                                    .buttonStyle(.plain)
+                                }
                             }
                         }
                     }
@@ -105,29 +97,38 @@ struct ShameBoardView: View {
                 .padding(.horizontal, 18)
                 .padding(.bottom, 28)
             }
+            .refreshable { await store.refresh() }
             .screenBackground()
             .toolbar(.hidden, for: .navigationBar)
-            .sheet(isPresented: $sharing) {
-                let season = SeasonStats(fines: allFines)
-                let club = clubName.trimmingCharacters(in: .whitespaces).isEmpty
-                    ? Club.fallbackName : clubName
-                ShareSheet(
-                    title: "Season so far",
-                    card: ShareCard(
-                        clubName: club,
-                        subtitle: "Season so far — \(matches.count) matchday\(matches.count == 1 ? "" : "s")",
-                        rows: ShareSummary.seasonPodium(players),
-                        bigLabel: "season total",
-                        bigAmount: Money.string(season.total),
-                        closing: closingLine
-                    ),
-                    filename: "payup-season.png"
-                )
-            }
+            .task { await store.loadIfNeeded() }
+            .sheet(isPresented: $sharing) { shareSheet }
         }
     }
 
-    private func offenderCard(_ player: Player) -> some View {
+    private var shareSheet: some View {
+        let club = UserDefaults.standard.string(forKey: Club.storageKey) ?? Club.fallbackName
+        let closing = UserDefaults.standard.string(forKey: Club.closingKey) ?? Club.defaultClosing
+        return ShareSheet(
+            title: "Season so far",
+            card: ShareCard(
+                clubName: club,
+                subtitle: "Season so far — \(store.matches.count) matchday\(store.matches.count == 1 ? "" : "s")",
+                rows: standings.prefix(3).map {
+                    ShareSummary.Tally(
+                        name: $0.player.name,
+                        details: ["\($0.fines.count) fine\($0.fines.count == 1 ? "" : "s")"],
+                        amountPence: $0.fines.totalPence
+                    )
+                },
+                bigLabel: "season total",
+                bigAmount: Money.string(store.seasonStats.total),
+                closing: closing
+            ),
+            filename: "payup-season.png"
+        )
+    }
+
+    private func offenderCard(_ standing: Standing) -> some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("BIGGEST OFFENDER")
                 .font(.system(size: 12, weight: .bold))
@@ -135,22 +136,22 @@ struct ShameBoardView: View {
                 .foregroundStyle(Theme.bg.opacity(0.5))
 
             HStack(spacing: 14) {
-                Text(player.initials)
+                Text(standing.player.initials)
                     .font(.system(size: 22, weight: .bold))
                     .foregroundStyle(Theme.beige)
                     .frame(width: 58, height: 58)
                     .background(Theme.bg, in: Circle())
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(player.name)
+                    Text(standing.player.name)
                         .font(.system(size: 24, weight: .bold))
                         .foregroundStyle(Theme.bg)
-                    Text("\(player.fines.count) fines · \(Money.string(player.balance)) outstanding")
+                    Text("\(standing.fines.count) fines · \(Money.string(standing.fines.outstandingPence)) outstanding")
                         .font(.system(size: 13))
                         .foregroundStyle(Theme.bg.opacity(0.55))
                 }
                 Spacer()
-                Text(Money.string(player.totalFined))
+                Text(Money.string(standing.fines.totalPence))
                     .font(.tally(30, .bold))
                     .foregroundStyle(Theme.bg)
             }
@@ -177,29 +178,27 @@ struct ShameBoardView: View {
                 .lineLimit(2)
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 8)
-            Text(detail)
-                .font(.tally(14, .bold))
-                .foregroundStyle(Theme.accent)
+            Text(detail).font(.tally(14, .bold)).foregroundStyle(Theme.accent)
         }
         .padding(16)
         .frame(maxWidth: .infinity, minHeight: 118, alignment: .topLeading)
         .cardSurface(Theme.Radius.card)
     }
 
-    private func rankRow(index: Int, player: Player) -> some View {
+    private func rankRow(index: Int, standing: Standing) -> some View {
         HStack(spacing: 12) {
             Text("\(index + 1)")
                 .font(.tally(13, .bold))
                 .foregroundStyle(index == 0 ? Theme.accent : Theme.textFaint)
                 .frame(width: 20, alignment: .leading)
 
-            Avatar(initials: player.initials, size: 36)
+            Avatar(initials: standing.player.initials, size: 36)
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(player.name)
+                Text(standing.player.name)
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(Theme.beige)
-                Text("\(player.fines.count) fine\(player.fines.count == 1 ? "" : "s")")
+                Text("\(standing.fines.count) fine\(standing.fines.count == 1 ? "" : "s")")
                     .font(.system(size: 12))
                     .foregroundStyle(Theme.textDim)
             }
@@ -207,17 +206,15 @@ struct ShameBoardView: View {
             Spacer(minLength: 6)
 
             VStack(alignment: .trailing, spacing: 2) {
-                Text(Money.string(player.totalFined))
+                Text(Money.string(standing.fines.totalPence))
                     .font(.tally(16, .bold))
                     .foregroundStyle(Theme.accent)
-                if player.balance > 0 {
-                    Text("\(Money.string(player.balance)) owed")
+                if standing.fines.outstandingPence > 0 {
+                    Text("\(Money.string(standing.fines.outstandingPence)) owed")
                         .font(.system(size: 11))
                         .foregroundStyle(Theme.textDim)
                 } else {
-                    Text("settled")
-                        .font(.system(size: 11))
-                        .foregroundStyle(Theme.textFaint)
+                    Text("settled").font(.system(size: 11)).foregroundStyle(Theme.textFaint)
                 }
             }
         }

@@ -2,25 +2,6 @@ import Foundation
 import SwiftData
 import Observation
 
-/// Anything owned by a team rather than by a person.
-protocol TeamScoped {
-    var teamId: UUID? { get }
-}
-
-extension Player: TeamScoped {}
-extension Match: TeamScoped {}
-extension FineType: TeamScoped {}
-extension Fine: TeamScoped {}
-
-extension Array where Element: TeamScoped {
-    /// Views hold whole-store queries and narrow them here. A remote repository
-    /// would filter server-side instead; the call sites don't change.
-    func scoped(to teamId: UUID?) -> [Element] {
-        guard let teamId else { return [] }
-        return filter { $0.teamId == teamId }
-    }
-}
-
 /// The signed-in user's current team, kept in the environment.
 @MainActor
 @Observable

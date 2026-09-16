@@ -101,8 +101,8 @@ enum UserID {
 /// This device's identity. Stands in for a real auth user id until sign-in
 /// exists; a Supabase user id drops straight into the same slot.
 enum CurrentUser {
-    private static let idKey = "localUserId"
-    private static let nameKey = "localUserName"
+    static let idKey = "localUserId"
+    static let nameKey = "localUserName"
 
     static var id: String {
         if let existing = UserDefaults.standard.string(forKey: idKey) { return existing }

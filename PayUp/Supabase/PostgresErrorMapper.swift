@@ -31,6 +31,34 @@ enum PostgresErrorMapper {
         return .serverRejected(message)
     }
 
+    /// Account deletion has one refusal of its own: the remaining admin can't
+    /// be promoted because they already own a team, and the entitlement trigger
+    /// would roll the whole transaction back. The server puts the successor's
+    /// display name in the error detail so the app can say who it means.
+    static func accountError(from message: String, detail: String?) -> AccountError {
+        if message.lowercased().contains("successor_owns_team") {
+            return .successorOwnsTeam(name: successorName(in: detail))
+        }
+        return .serverRejected(message)
+    }
+
+    /// The detail is the display name verbatim — confirmed against the live
+    /// error: {"code":"23514","message":"successor_owns_team","details":"Test C"}.
+    ///
+    /// Deliberately not clever about it. An earlier version stripped a `key=`
+    /// or `key:` prefix in case the server labelled the value, but display
+    /// names are user-entered: "Sam: the keeper" would have been silently
+    /// mangled to "the keeper". Showing a name that isn't theirs is worse than
+    /// showing an odd one, and the format is known.
+    static func successorName(in detail: String?) -> String? {
+        guard let text = detail?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !text.isEmpty else { return nil }
+        // A name, not prose. Anything longer is a message we shouldn't be
+        // pasting into the middle of a sentence of our own.
+        guard text.count <= 60 else { return nil }
+        return text
+    }
+
     /// "team_limit_reached: 3" carries its limit; a bare token doesn't.
     private static func limit(in token: String) -> Int? {
         let digits = token.drop { !$0.isNumber }.prefix { $0.isNumber }

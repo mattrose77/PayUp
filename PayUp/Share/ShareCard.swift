@@ -6,19 +6,22 @@ import UniformTypeIdentifiers
 /// objects — ImageRenderer draws it outside the view hierarchy, so it can't
 /// rely on environment or SwiftData.
 struct ShareCard: View {
-    /// 360×450 at 3× renders to 1080×1350, the portrait size social apps like.
-    static let size = CGSize(width: 360, height: 450)
+    /// Width is fixed so every card lands in a chat at the same size; 360 at 3×
+    /// renders to 1080px wide. Height is whatever the rows need.
+    static let width: CGFloat = 360
+    /// Below this the card stops looking like a card and starts looking like a
+    /// crop, so a one-fine week is padded out to a portrait shape.
+    static let minHeight: CGFloat = 420
 
-    /// Offence lists wrap, so rows are variable height. Rather than guess a row
-    /// count, spend a points budget and stop when the next row won't fit.
-    private static let rowsBudget: CGFloat = 236
-    private static let nameLineHeight: CGFloat = 16
-    private static let detailLineHeight: CGFloat = 13
-    private static let rowSpacing: CGFloat = 7
-    private static let maxDetailLines = 3
+    private static let padding: CGFloat = 24
     /// Row width left for offences once the padding and £ column are taken out.
     private static let detailWidth: CGFloat = 250
     private static let detailFontSize: CGFloat = 10
+    private static let normalRowSpacing: CGFloat = 7
+    private static let tightRowSpacing: CGFloat = 4
+    /// A full squad is ~14. Past that the card is getting long enough that
+    /// tightening the gaps is worth it — the type stays the size it was.
+    private static let tightenBeyondRows = 18
 
     let clubName: String
     let subtitle: String
@@ -27,30 +30,23 @@ struct ShareCard: View {
     let bigAmount: String
     let closing: String
 
+    /// Every fined player, every offence. Nothing is dropped to fit: the card
+    /// grows instead. Hiding a name defeats the point of sending it.
     private var laidOut: [(tally: ShareSummary.Tally, lines: [String])] {
-        var out: [(ShareSummary.Tally, [String])] = []
-        var remaining = Self.rowsBudget
-        for tally in rows {
-            let packed = ShareSummary.pack(
+        rows.map { tally in
+            (tally, ShareSummary.pack(
                 tally.details,
                 maxWidth: Self.detailWidth,
                 fontSize: Self.detailFontSize
-            )
-            let lines = Array(packed.prefix(Self.maxDetailLines))
-            let cost = Self.nameLineHeight
-                + CGFloat(lines.count) * Self.detailLineHeight
-                + Self.rowSpacing
-            if remaining - cost < 0 { break }
-            remaining -= cost
-            out.append((tally, lines))
+            ))
         }
-        return out
+    }
+
+    private var rowSpacing: CGFloat {
+        rows.count > Self.tightenBeyondRows ? Self.tightRowSpacing : Self.normalRowSpacing
     }
 
     var body: some View {
-        let shown = laidOut
-        let hidden = rows.count - shown.count
-
         VStack(alignment: .leading, spacing: 0) {
             Text(ShareSummary.headline(clubName))
                 .font(.system(size: 21, weight: .bold))
@@ -66,8 +62,8 @@ struct ShareCard: View {
                 .frame(height: 1)
                 .padding(.vertical, 12)
 
-            VStack(spacing: Self.rowSpacing) {
-                ForEach(Array(shown.enumerated()), id: \.offset) { _, entry in
+            VStack(spacing: rowSpacing) {
+                ForEach(Array(laidOut.enumerated()), id: \.offset) { _, entry in
                     HStack(alignment: .firstTextBaseline, spacing: 10) {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(entry.tally.name)
@@ -87,19 +83,10 @@ struct ShareCard: View {
                             .foregroundStyle(Theme.accent)
                     }
                 }
-
-                if hidden > 0 {
-                    HStack {
-                        Text("…and \(hidden) more")
-                            .font(.system(size: 11))
-                            .foregroundStyle(Theme.textFaint)
-                        Spacer()
-                    }
-                }
             }
 
-            Spacer(minLength: 12)
-
+            // Sits directly under the last row. Pinning it to the bottom of a
+            // fixed frame is what used to leave a hole above it.
             VStack(alignment: .leading, spacing: 8) {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Text(bigAmount)
@@ -119,9 +106,14 @@ struct ShareCard: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
+            .padding(.top, 18)
         }
-        .padding(24)
-        .frame(width: Self.size.width, height: Self.size.height, alignment: .topLeading)
+        .padding(Self.padding)
+        // No height: the card is as tall as its rows. The minimum only bites on
+        // very short lists, and centring keeps the top and bottom margins equal
+        // rather than dropping all the slack in one place.
+        .frame(width: Self.width, alignment: .topLeading)
+        .frame(minHeight: Self.minHeight)
         .background(Theme.bg)
     }
 }
@@ -129,9 +121,14 @@ struct ShareCard: View {
 // MARK: - Rendering
 
 enum ShareCardRenderer {
+    /// The share sheet's preview and the exported file both come through here,
+    /// so what you see is what gets sent.
     @MainActor
     static func png(from card: ShareCard) -> UIImage? {
         let renderer = ImageRenderer(content: card)
+        // Propose the fixed width and leave the height unspecified, so the
+        // snapshot is the view's own intrinsic height rather than a guess.
+        renderer.proposedSize = ProposedViewSize(width: ShareCard.width, height: nil)
         renderer.scale = 3
         renderer.isOpaque = true
         return renderer.uiImage

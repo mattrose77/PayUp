@@ -26,7 +26,9 @@ final class TeamDataStore {
     private(set) var matches: [Match] = []
     private(set) var fines: [Fine] = []
 
-    private let teamId: UUID
+    /// Readable so the session can tell whether the store it holds still
+    /// belongs to the current team.
+    let teamId: UUID
     private let userId: String
     private let playerRepo: PlayerRepository
     private let fineTypeRepo: FineTypeRepository

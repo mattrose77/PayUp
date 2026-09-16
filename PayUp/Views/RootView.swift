@@ -4,7 +4,11 @@ import SwiftData
 private struct TeamSessionKey: @preconcurrency EnvironmentKey {
     /// Never builds a container — see UnavailableTeamRepository.
     @MainActor
-    static let defaultValue = TeamSession(repository: UnavailableTeamRepository(), userId: "")
+    static let defaultValue = TeamSession(
+        repository: UnavailableTeamRepository(),
+        userId: "",
+        makeDataStore: { _, _ in TeamDataStoreKey.defaultValue }
+    )
 }
 
 private struct TeamDataStoreKey: @preconcurrency EnvironmentKey {
@@ -36,7 +40,6 @@ struct RootView: View {
 
     @State private var auth = AuthService(client: SupabaseClientProvider.shared)
     @State private var session: TeamSession?
-    @State private var dataStore: TeamDataStore?
     @State private var showSplash = true
 
     var body: some View {
@@ -49,8 +52,10 @@ struct RootView: View {
             }
         }
         .task {
+            // Session building is left entirely to onChange below. Doing it
+            // here as well ran two builds concurrently on a cold start, each
+            // overwriting the other's session.
             await auth.restore()
-            await buildSessionIfNeeded()
             try? await Task.sleep(for: .milliseconds(1200))
             withAnimation(.easeOut(duration: 0.35)) { showSplash = false }
         }
@@ -71,21 +76,44 @@ struct RootView: View {
             AuthView(auth: auth)
 
         case .signedIn:
-            if let session, session.hasLoaded {
-                Group {
-                    if session.team == nil {
-                        TeamOnboardingView(auth: auth)
-                    } else if let dataStore {
-                        MainTabView(auth: auth)
-                            .environment(\.teamDataStore, dataStore)
-                    } else {
-                        loading
-                    }
-                }
-                .environment(\.teamSession, session)
+            if let session {
+                signedIn(session)
+                    .environment(\.teamSession, session)
             } else {
                 loading
             }
+        }
+    }
+
+    /// Every branch is terminal except `.idle`/`.loading`, which only hold
+    /// while a fetch is genuinely in flight. A failure lands on an error with
+    /// a retry rather than a spinner that never resolves.
+    @ViewBuilder
+    private func signedIn(_ session: TeamSession) -> some View {
+        switch session.phase {
+        case .idle, .loading:
+            loading
+        case .needsTeam:
+            TeamOnboardingView(auth: auth)
+        case .ready:
+            if let store = session.dataStore {
+                MainTabView(auth: auth).environment(\.teamDataStore, store)
+            } else {
+                // Unreachable: `.ready` is only set once the store is built.
+                failed("The team loaded but its data didn't.")
+            }
+        case .failed(let message):
+            failed(message)
+        }
+    }
+
+    private func failed(_ message: String) -> some View {
+        ZStack {
+            Theme.bg.ignoresSafeArea()
+            ErrorStateView(message: message) {
+                Task { await session?.refresh() }
+            }
+            .padding(20)
         }
     }
 
@@ -100,41 +128,38 @@ struct RootView: View {
         guard case .signedIn(let userId, _) = auth.state else {
             session?.signedOut()
             session = nil
-            dataStore = nil
             return
         }
 
-        if session == nil {
-            let repository = SupabaseTeamRepository(client: SupabaseClientProvider.shared)
-            let built = TeamSession(repository: repository, userId: userId)
+        if let session {
+            session.adopt(userId: userId)
+        } else {
             // Nothing is seeded: every club's fines list differs, and a wrong
             // default is worse than an empty list with a good empty state.
-            session = built
-        } else {
-            session?.adopt(userId: userId)
-        }
-
-        await session?.refresh()
-        rebuildDataStore(userId: userId)
-    }
-
-    /// A fresh store per team — never reuse one across accounts or teams.
-    private func rebuildDataStore(userId: String) {
-        guard let teamId = session?.team?.id else {
-            dataStore = nil
-            return
-        }
-        if dataStore == nil {
-            let client = SupabaseClientProvider.shared
-            dataStore = TeamDataStore(
-                teamId: teamId,
+            session = TeamSession(
+                repository: SupabaseTeamRepository(client: SupabaseClientProvider.shared),
                 userId: userId,
-                players: SupabasePlayerRepository(client: client),
-                fineTypes: SupabaseFineTypeRepository(client: client),
-                matches: SupabaseMatchRepository(client: client),
-                fines: SupabaseFineRepository(client: client)
+                makeDataStore: Self.makeSupabaseDataStore
             )
         }
+
+        // The store is built inside refresh(), alongside the team it belongs
+        // to, so joining or creating one rebuilds it too.
+        await session?.refresh()
+    }
+
+    /// A fresh store per team — never reused across accounts or teams.
+    @MainActor
+    private static func makeSupabaseDataStore(teamId: UUID, userId: String) -> TeamDataStore {
+        let client = SupabaseClientProvider.shared
+        return TeamDataStore(
+            teamId: teamId,
+            userId: userId,
+            players: SupabasePlayerRepository(client: client),
+            fineTypes: SupabaseFineTypeRepository(client: client),
+            matches: SupabaseMatchRepository(client: client),
+            fines: SupabaseFineRepository(client: client)
+        )
     }
 }
 

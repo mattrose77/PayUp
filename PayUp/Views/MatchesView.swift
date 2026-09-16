@@ -77,7 +77,7 @@ struct MatchesView: View {
                 NewMatchSheet().environment(\.teamDataStore, store)
             }
             .sheet(isPresented: $showingSettings) {
-                SettingsView(auth: auth)
+                SettingsView(auth: auth).environment(\.teamDataStore, store)
             }
             .alert(
                 pendingDelete.map { "Delete \($0.opponent)?" } ?? "",

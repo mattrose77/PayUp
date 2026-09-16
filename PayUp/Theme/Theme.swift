@@ -17,6 +17,8 @@ enum Theme {
     /// sit on beige. The electric lime is the same brightness as the card it
     /// lands on, so on light ground it both glares and vanishes.
     static let accentDeep = Color(hex: 0x55741A)
+    /// Errors and the one irreversible action. Never decorative.
+    static let danger = Color(hex: 0xFF6B6B)
 
     enum Radius {
         static let card: CGFloat = 22

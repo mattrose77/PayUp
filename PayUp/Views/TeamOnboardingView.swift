@@ -13,6 +13,7 @@ struct TeamOnboardingView: View {
     @State private var displayName = ""
     @State private var error: String?
     @State private var busy = false
+    @State private var deletion: AccountDeletionFlow?
     @FocusState private var focused: Bool
 
     var body: some View {
@@ -37,19 +38,48 @@ struct TeamOnboardingView: View {
                     joinForm
                 }
 
-                // Without this there's no way off this screen for someone
+                // Without these there's no way off this screen for someone
                 // signed in to the wrong account — and a Supabase session
                 // outlives an app uninstall, so it happens.
-                Button("Sign out") { Task { await auth.signOut() } }
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(Theme.textDim)
-                    .frame(maxWidth: .infinity)
-                    .padding(.top, 8)
+                VStack(spacing: 14) {
+                    Button("Sign out") { Task { await auth.signOut() } }
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(Theme.textDim)
+
+                    // Someone who signs up and never makes a team still has an
+                    // account, so deleting it has to be reachable from here —
+                    // App Store guideline 5.1.1(v). Settings is behind a team.
+                    Button("Delete account") { deletion = makeDeletionFlow() }
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(Theme.danger)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.top, 8)
             }
             .padding(20)
         }
         .screenBackground()
         .animation(.snappy(duration: 0.25), value: mode)
+        .sheet(item: $deletion) { DeleteAccountView(flow: $0) }
+    }
+
+    /// No team here by definition, so this is always the account-only case —
+    /// but it's resolved rather than assumed, so a stale session that does
+    /// have a team can't be told the wrong thing.
+    private func makeDeletionFlow() -> AccountDeletionFlow {
+        AccountDeletionFlow(
+            deletionCase: AccountDeletionCase.resolve(
+                team: session.team,
+                members: session.members,
+                userId: auth.userId ?? ""
+            ),
+            account: SupabaseAccountRepository(client: SupabaseClientProvider.shared),
+            email: auth.email ?? ""
+        ) { [session] in
+            LocalState.clear()
+            session.signedOut()
+            await auth.signOut()
+        }
     }
 
     // MARK: - Chooser

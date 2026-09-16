@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct AuthView: View {
-    enum Mode: Hashable { case signIn, signUp, reset }
+    enum Mode: Hashable { case signIn, signUp, reset, checkEmail }
 
     let auth: AuthService
 
@@ -12,6 +12,13 @@ struct AuthView: View {
     @State private var passwordError: String?
     @State private var notice: String?
     @State private var busy = false
+    /// Set when sign-in failed only because the address isn't confirmed, or
+    /// after a sign-up that needs one. Drives the resend panel.
+    @State private var unconfirmed: String?
+    @State private var throttle = ResendThrottle()
+    @State private var resendNotice: String?
+    @State private var resending = false
+    @State private var secondsLeft = 0
     @FocusState private var focus: Field?
 
     private enum Field { case email, password }
@@ -21,33 +28,41 @@ struct AuthView: View {
             VStack(alignment: .leading, spacing: 24) {
                 header
 
-                VStack(alignment: .leading, spacing: 18) {
-                    field(
-                        label: "Email",
-                        text: $email,
-                        prompt: "you@example.com",
-                        error: emailError,
-                        focusValue: .email
-                    )
-                    .keyboardType(.emailAddress)
-                    .textContentType(.emailAddress)
-                    .textInputAutocapitalization(.never)
+                if mode == .checkEmail {
+                    confirmationPanel
+                } else {
+                    VStack(alignment: .leading, spacing: 18) {
+                        field(
+                            label: "Email",
+                            text: $email,
+                            prompt: "you@example.com",
+                            error: emailError,
+                            focusValue: .email
+                        )
+                        .keyboardType(.emailAddress)
+                        .textContentType(.emailAddress)
+                        .textInputAutocapitalization(.never)
 
-                    if mode != .reset {
-                        secureField
+                        if mode != .reset {
+                            secureField
+                        }
                     }
-                }
 
-                if let notice {
-                    Text(notice)
-                        .font(.system(size: 14))
-                        .foregroundStyle(Theme.accent)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+                    if let notice {
+                        Text(notice)
+                            .font(.system(size: 14))
+                            .foregroundStyle(Theme.accent)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
 
-                Button(primaryTitle, action: submit)
-                    .buttonStyle(AccentButtonStyle())
-                    .disabled(busy || !isValid)
+                    // Sign-in blocked only by an unconfirmed address: the fix
+                    // is a resend, not a different password.
+                    if unconfirmed != nil { resendPanel }
+
+                    Button(primaryTitle, action: submit)
+                        .buttonStyle(AccentButtonStyle())
+                        .disabled(busy || !isValid)
+                }
 
                 switcher
             }
@@ -55,6 +70,111 @@ struct AuthView: View {
         }
         .screenBackground()
         .animation(.snappy(duration: 0.25), value: mode)
+        .animation(.snappy(duration: 0.25), value: unconfirmed)
+        .task(id: throttle.lastSent) { await countDown() }
+    }
+
+    // MARK: - Confirmation
+
+    /// Shown after sign-up instead of dumping the user back on a sign-in form
+    /// that will refuse them until they've clicked the link.
+    private var confirmationPanel: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Image(systemName: "envelope.badge")
+                .font(.system(size: 30, weight: .light))
+                .foregroundStyle(Theme.accent)
+
+            Text("Confirm your email")
+                .font(.system(size: 22, weight: .bold))
+                .foregroundStyle(Theme.beige)
+
+            Text("Your account is created. We've sent a confirmation link to \(unconfirmed ?? email) — click it, then come back and sign in.")
+                .font(.system(size: 15))
+                .foregroundStyle(Theme.textDim)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Text(spamWarning)
+                .font(.system(size: 13))
+                .foregroundStyle(Theme.textFaint)
+                .fixedSize(horizontal: false, vertical: true)
+
+            resendControls
+
+            Button("Back to sign in") { switchTo(.signIn) }
+                .buttonStyle(QuietButtonStyle())
+        }
+        .padding(20)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .cardSurface(Theme.Radius.card)
+    }
+
+    /// The compact version, under the sign-in fields.
+    private var resendPanel: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(spamWarning)
+                .font(.system(size: 13))
+                .foregroundStyle(Theme.textDim)
+                .fixedSize(horizontal: false, vertical: true)
+            resendControls
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .cardSurface()
+    }
+
+    private var spamWarning: String {
+        "It can take a minute to arrive, and it often lands in spam — it comes from a generic Supabase address, not from PayUp."
+    }
+
+    @ViewBuilder
+    private var resendControls: some View {
+        Button(resendTitle) { resend() }
+            .buttonStyle(QuietButtonStyle())
+            .disabled(resending || secondsLeft > 0)
+
+        if let resendNotice {
+            Text(resendNotice)
+                .font(.system(size: 13))
+                .foregroundStyle(Theme.accent)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var resendTitle: String {
+        if resending { return "Sending…" }
+        if secondsLeft > 0 { return "Resend in \(secondsLeft)s" }
+        return "Resend confirmation email"
+    }
+
+    private func resend() {
+        guard let address = unconfirmed ?? nonEmptyEmail, throttle.canSend() else { return }
+        resending = true
+        resendNotice = nil
+        Task {
+            do {
+                try await auth.resendConfirmation(email: address)
+                throttle.record()
+                resendNotice = "Sent. Check your inbox for \(address), and your spam folder."
+            } catch {
+                resendNotice = nil
+                emailError = AuthErrorText.forResend(error)
+            }
+            resending = false
+        }
+    }
+
+    /// Ticks the button's label down so a disabled button explains itself.
+    private func countDown() async {
+        while throttle.secondsRemaining() > 0 {
+            secondsLeft = throttle.secondsRemaining()
+            try? await Task.sleep(for: .seconds(1))
+        }
+        secondsLeft = 0
+    }
+
+    private var nonEmptyEmail: String? {
+        let address = email.trimmingCharacters(in: .whitespaces)
+        return address.isEmpty ? nil : address
     }
 
     // MARK: - Pieces
@@ -77,6 +197,7 @@ struct AuthView: View {
         case .signIn: return "Sign in to get to your team's fines."
         case .signUp: return "Create an account to start tracking fines."
         case .reset: return "We'll email you a link to set a new password."
+        case .checkEmail: return "One more step before you're in."
         }
     }
 
@@ -86,6 +207,7 @@ struct AuthView: View {
         case .signIn: return "Sign in"
         case .signUp: return "Create account"
         case .reset: return "Send reset link"
+        case .checkEmail: return "Sign in"
         }
     }
 
@@ -150,6 +272,9 @@ struct AuthView: View {
                 Button("Sign in") { switchTo(.signIn) }.foregroundStyle(Theme.accent)
             case .reset:
                 Button("Back to sign in") { switchTo(.signIn) }.foregroundStyle(Theme.accent)
+            case .checkEmail:
+                Text("Already confirmed?").foregroundStyle(Theme.textDim)
+                Button("Sign in") { switchTo(.signIn) }.foregroundStyle(Theme.accent)
             }
             Spacer()
         }
@@ -167,6 +292,10 @@ struct AuthView: View {
         emailError = nil
         passwordError = nil
         notice = nil
+        resendNotice = nil
+        // The address stays pending across a hop back to sign-in, so the resend
+        // option is still there when they come back to try again.
+        if next == .signUp { unconfirmed = nil }
         mode = next
     }
 
@@ -180,10 +309,19 @@ struct AuthView: View {
         Task {
             do {
                 switch mode {
-                case .signIn:
+                case .signIn, .checkEmail:
                     try await auth.signIn(email: address, password: password)
+                    unconfirmed = nil
                 case .signUp:
-                    try await auth.signUp(email: address, password: password)
+                    let usable = try await auth.signUp(email: address, password: password)
+                    if !usable {
+                        // Confirmation is on, so there's no session yet. Say so
+                        // rather than bouncing them to a form that will refuse.
+                        unconfirmed = address
+                        password = ""
+                        throttle.record()   // Supabase just sent one.
+                        mode = .checkEmail
+                    }
                 case .reset:
                     try await auth.sendPasswordReset(email: address)
                     notice = "If that address has an account, a reset link is on its way."
@@ -191,8 +329,15 @@ struct AuthView: View {
             } catch {
                 // Errors land under the field they belong to, never in an alert.
                 switch mode {
-                case .signIn:
-                    passwordError = AuthErrorText.forSignIn(error)
+                case .signIn, .checkEmail:
+                    let problem = AuthErrorText.signInProblem(error, email: address)
+                    unconfirmed = problem.canResendConfirmation ? address : nil
+                    if problem.canResendConfirmation {
+                        emailError = problem.message
+                        passwordError = nil
+                    } else {
+                        passwordError = problem.message
+                    }
                 case .signUp:
                     let text = AuthErrorText.forSignUp(error)
                     if text.lowercased().contains("email") {

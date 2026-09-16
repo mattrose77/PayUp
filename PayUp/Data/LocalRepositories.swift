@@ -62,6 +62,24 @@ actor LocalStore {
     func removeFine(_ id: UUID) { fines.removeAll { $0.id == id } }
 
     func finesFor(player id: UUID) -> [Fine] { fines.filter { $0.playerId == id } }
+
+    /// Mirrors what `delete_account()` does when the last owner leaves. Fines
+    /// go first on purpose: `fines.player_id` is `on delete restrict`, so
+    /// cascading the team straight to players would be blocked by them.
+    func removeTeam(_ teamId: UUID) {
+        fines.removeAll { $0.teamId == teamId }
+        matches.removeAll { $0.teamId == teamId }
+        players.removeAll { $0.teamId == teamId }
+        fineTypes.removeAll { $0.teamId == teamId }
+    }
+
+    func counts(teamId: UUID) -> TeamContents {
+        TeamContents(
+            players: players.filter { $0.teamId == teamId }.count,
+            matches: matches.filter { $0.teamId == teamId }.count,
+            fines: fines.filter { $0.teamId == teamId }.count
+        )
+    }
 }
 
 struct LocalPlayerRepository: PlayerRepository {

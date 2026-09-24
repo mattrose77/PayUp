@@ -107,7 +107,7 @@ struct TeamOnboardingView: View {
     private var limitExplanation: String {
         let limit = session.entitlements.maxTeamsOwned
         return limit == 1
-            ? "Free accounts can run one team. You already own one, so you can't create another — you can still join a team with a code."
+            ? "Free accounts can run one team. You already own one, so you can't create another, you can still join a team with a code."
             : "Your account can own up to \(limit) teams and you're at that limit. You can still join a team with a code."
     }
 

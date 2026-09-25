@@ -19,14 +19,14 @@ struct MatchesView: View {
                 VStack(spacing: 14) {
                     ScreenHeader(title: "PayUp", subtitle: "Matchday fines") {
                         HStack(spacing: 10) {
-                            HeaderIconButton(systemName: "gearshape.fill") { showingSettings = true }
+                            HeaderIconButton(systemName: "gearshape.fill", label: "Settings") { showingSettings = true }
                             if !store.matches.isEmpty {
                                 HeaderAddButton(enabled: canStartMatchday) { showingNewMatch = true }
                             }
                         }
                     }
 
-                    DataStateContainer(state: store.state, retry: { await store.refresh() }) {
+                    DataStateContainer(state: store.state, refreshError: store.refreshError, retry: { await store.refresh() }) {
                         SeasonPotCard(stats: store.seasonStats)
                             .padding(.bottom, 6)
 

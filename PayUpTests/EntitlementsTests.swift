@@ -52,7 +52,7 @@ final class EntitlementsTests: XCTestCase {
 
     func testOwnerAtTheLimitCannotCreateASecondTeam() async throws {
         let repo = repository()
-        try await repo.createTeam(name: "Minety FC", userId: me, displayName: "Matt")
+        _ = try await repo.createTeam(name: "Minety FC", userId: me, displayName: "Matt")
 
         await XCTAssertThrowsErrorAsync(
             try await repo.createTeam(name: "Minety Reserves", userId: me, displayName: "Matt")
@@ -67,7 +67,7 @@ final class EntitlementsTests: XCTestCase {
     func testAdminOnSomeoneElsesTeamCanStillCreateTheirOwn() async throws {
         let repo = repository()
         let theirs = try await repo.createTeam(name: "Their Club", userId: mate, displayName: "Sam")
-        try await repo.joinTeam(code: theirs.joinCode, userId: me, displayName: "Matt")
+        _ = try await repo.joinTeam(code: theirs.joinCode, userId: me, displayName: "Matt")
 
         let hoisted4 = try await repo.ownedTeamCount(forUser: me)
         XCTAssertEqual(hoisted4, 0, "an admin seat is not an owned team")
@@ -83,10 +83,10 @@ final class EntitlementsTests: XCTestCase {
 
     func testOwnerCanStillJoinAnotherTeamAsAdmin() async throws {
         let repo = repository()
-        try await repo.createTeam(name: "Minety FC", userId: me, displayName: "Matt")
+        _ = try await repo.createTeam(name: "Minety FC", userId: me, displayName: "Matt")
         let theirs = try await repo.createTeam(name: "Their Club", userId: mate, displayName: "Sam")
 
-        try await repo.joinTeam(code: theirs.joinCode, userId: me, displayName: "Matt")
+        _ = try await repo.joinTeam(code: theirs.joinCode, userId: me, displayName: "Matt")
 
         let hoisted7 = try await repo.ownedTeamCount(forUser: me)
         XCTAssertEqual(hoisted7, 1, "joining didn't consume an owner slot")
@@ -116,9 +116,9 @@ final class EntitlementsTests: XCTestCase {
 
     func testLeavingSomeoneElsesTeamDoesNotChangeTheOwnedCount() async throws {
         let repo = repository()
-        try await repo.createTeam(name: "Minety FC", userId: me, displayName: "Matt")
+        _ = try await repo.createTeam(name: "Minety FC", userId: me, displayName: "Matt")
         let theirs = try await repo.createTeam(name: "Their Club", userId: mate, displayName: "Sam")
-        try await repo.joinTeam(code: theirs.joinCode, userId: me, displayName: "Matt")
+        _ = try await repo.joinTeam(code: theirs.joinCode, userId: me, displayName: "Matt")
 
         try await repo.leaveTeam(teamId: theirs.id, userId: me)
 

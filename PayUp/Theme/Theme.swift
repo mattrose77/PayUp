@@ -58,13 +58,21 @@ enum Money {
         return negative ? "-" + body : body
     }
 
-    /// Parses "2", "2.50", "2,50" into pence. Nil if it isn't a number.
+    /// No fine is worth more than this. Also keeps a long run of digits (or a
+    /// pasted "inf") from overflowing Int — this runs on every keystroke — and
+    /// stays well inside the Postgres `integer` column.
+    static let maxPence = 1_000_000
+
+    /// Parses "2", "2.50", "2,50" into pence. Nil if it isn't a number or is
+    /// out of range.
     static func pence(from text: String) -> Int? {
         let cleaned = text
             .replacingOccurrences(of: ",", with: ".")
             .replacingOccurrences(of: "£", with: "")
             .trimmingCharacters(in: .whitespaces)
-        guard !cleaned.isEmpty, let value = Double(cleaned), value >= 0 else { return nil }
-        return Int((value * 100).rounded())
+        guard !cleaned.isEmpty, let value = Double(cleaned), value.isFinite, value >= 0 else { return nil }
+        let pence = (value * 100).rounded()
+        guard pence <= Double(maxPence) else { return nil }
+        return Int(pence)
     }
 }

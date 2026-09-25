@@ -80,6 +80,7 @@ struct EmptyStateView: View {
 
 struct DataStateContainer<Content: View>: View {
     let state: TeamDataStore.LoadState
+    var refreshError: String? = nil
     let retry: () async -> Void
     @ViewBuilder var content: Content
 
@@ -90,6 +91,19 @@ struct DataStateContainer<Content: View>: View {
         case .failed(let message):
             ErrorStateView(message: message) { Task { await retry() } }
         case .loaded:
+            if let refreshError {
+                HStack(alignment: .top, spacing: 10) {
+                    Image(systemName: "wifi.exclamationmark")
+                        .foregroundStyle(Theme.danger)
+                    Text("Couldn't refresh — showing what was already loaded. \(refreshError)")
+                        .font(.system(size: 13))
+                        .foregroundStyle(Theme.textDim)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 0)
+                }
+                .padding(14)
+                .cardSurface()
+            }
             content
         }
     }

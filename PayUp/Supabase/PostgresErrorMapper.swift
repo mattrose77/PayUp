@@ -20,6 +20,16 @@ enum PostgresErrorMapper {
         // throws the same thing when a non-owner tries an owner-only action.
         if token.contains("not_owner") { return .notAuthorised }
 
+        // PGRST116: an update/select expected exactly one row and got none —
+        // in practice the other member deleted it, or it's no longer visible.
+        // PostgREST's own wording ("JSON object requested, multiple (or no)
+        // rows returned") means nothing to anyone.
+        if token.contains("pgrst116") || token.contains("json object requested") {
+            return .serverRejected(
+                "That's no longer there — it may have been changed or deleted on another phone. Pull down to refresh."
+            )
+        }
+
         // 23503 is a foreign key violation. The only restrict-on-delete in the
         // schema is fines -> players, so this is always "they have history".
         if token.contains("23503")

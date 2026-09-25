@@ -46,6 +46,19 @@ final class AuthService {
                 userId: UserID.normalise(session.user.id.uuidString),
                 email: session.user.email ?? ""
             )
+        } catch where error is URLError {
+            // Offline with an expired access token: the refresh couldn't reach
+            // the server, which isn't the same as the session being invalid.
+            // Stay signed in on the stored session; the team screen then shows
+            // a retry (and a sign-out) instead of bouncing to the sign-in form.
+            if let stored = client.auth.currentSession {
+                state = .signedIn(
+                    userId: UserID.normalise(stored.user.id.uuidString),
+                    email: stored.user.email ?? ""
+                )
+            } else {
+                state = .signedOut
+            }
         } catch {
             state = .signedOut
         }

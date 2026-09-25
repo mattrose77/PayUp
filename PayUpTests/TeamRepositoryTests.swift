@@ -70,7 +70,7 @@ final class TeamRepositoryTests: XCTestCase {
 
     func testSecondMemberJoinsAsAdmin() async throws {
         let team = try await makeTeam()
-        try await repo.joinTeam(code: team.joinCode, userId: mate, displayName: "Sam")
+        _ = try await repo.joinTeam(code: team.joinCode, userId: mate, displayName: "Sam")
 
         let members = try await repo.members(of: team.id)
         XCTAssertEqual(members.count, 2)
@@ -80,7 +80,7 @@ final class TeamRepositoryTests: XCTestCase {
     func testJoinIsForgivingAboutFormatting() async throws {
         let team = try await makeTeam()
         let messy = " " + team.joinCode.lowercased() + "-"
-        try await repo.joinTeam(code: messy, userId: mate, displayName: "Sam")
+        _ = try await repo.joinTeam(code: messy, userId: mate, displayName: "Sam")
 
         let hoisted3 = try await repo.members(of: team.id).count
         XCTAssertEqual(hoisted3, 2)
@@ -88,7 +88,7 @@ final class TeamRepositoryTests: XCTestCase {
 
     func testThirdMemberIsRejected() async throws {
         let team = try await makeTeam()
-        try await repo.joinTeam(code: team.joinCode, userId: mate, displayName: "Sam")
+        _ = try await repo.joinTeam(code: team.joinCode, userId: mate, displayName: "Sam")
 
         await XCTAssertThrowsErrorAsync(
             try await repo.joinTeam(code: team.joinCode, userId: stranger, displayName: "Nope")
@@ -116,7 +116,7 @@ final class TeamRepositoryTests: XCTestCase {
 
     func testOwnerCanRemoveAdmin() async throws {
         let team = try await makeTeam()
-        try await repo.joinTeam(code: team.joinCode, userId: mate, displayName: "Sam")
+        _ = try await repo.joinTeam(code: team.joinCode, userId: mate, displayName: "Sam")
         let adminRoster = try await repo.members(of: team.id)
         let admin = try XCTUnwrap(adminRoster.first { $0.role == .admin })
 
@@ -129,7 +129,7 @@ final class TeamRepositoryTests: XCTestCase {
 
     func testAdminCannotRemoveOwner() async throws {
         let team = try await makeTeam()
-        try await repo.joinTeam(code: team.joinCode, userId: mate, displayName: "Sam")
+        _ = try await repo.joinTeam(code: team.joinCode, userId: mate, displayName: "Sam")
         let ownerMemberRoster = try await repo.members(of: team.id)
         let ownerMember = try XCTUnwrap(ownerMemberRoster.first { $0.role == .owner })
 
@@ -142,7 +142,7 @@ final class TeamRepositoryTests: XCTestCase {
 
     func testAdminCannotRemoveThemselves() async throws {
         let team = try await makeTeam()
-        try await repo.joinTeam(code: team.joinCode, userId: mate, displayName: "Sam")
+        _ = try await repo.joinTeam(code: team.joinCode, userId: mate, displayName: "Sam")
         let adminRoster = try await repo.members(of: team.id)
         let admin = try XCTUnwrap(adminRoster.first { $0.role == .admin })
 
@@ -153,7 +153,7 @@ final class TeamRepositoryTests: XCTestCase {
 
     func testAdminCanLeave() async throws {
         let team = try await makeTeam()
-        try await repo.joinTeam(code: team.joinCode, userId: mate, displayName: "Sam")
+        _ = try await repo.joinTeam(code: team.joinCode, userId: mate, displayName: "Sam")
 
         try await repo.leaveTeam(teamId: team.id, userId: mate)
 
@@ -172,7 +172,7 @@ final class TeamRepositoryTests: XCTestCase {
 
     func testRemovingAMemberLeavesTeamDataUntouched() async throws {
         let team = try await makeTeam()
-        try await repo.joinTeam(code: team.joinCode, userId: mate, displayName: "Sam")
+        _ = try await repo.joinTeam(code: team.joinCode, userId: mate, displayName: "Sam")
 
         // The team's data lives in its own repositories now, not the team store.
         let data = LocalStore()
@@ -219,14 +219,14 @@ final class TeamRepositoryTests: XCTestCase {
             try await repo.joinTeam(code: original, userId: mate, displayName: "Sam")
         ) { XCTAssertEqual($0 as? TeamError, .codeNotFound) }
 
-        try await repo.joinTeam(code: fresh, userId: mate, displayName: "Sam")
+        _ = try await repo.joinTeam(code: fresh, userId: mate, displayName: "Sam")
         let hoisted8 = try await repo.members(of: team.id).count
         XCTAssertEqual(hoisted8, 2)
     }
 
     func testOnlyOwnerCanRegenerate() async throws {
         let team = try await makeTeam()
-        try await repo.joinTeam(code: team.joinCode, userId: mate, displayName: "Sam")
+        _ = try await repo.joinTeam(code: team.joinCode, userId: mate, displayName: "Sam")
 
         await XCTAssertThrowsErrorAsync(try await repo.regenerateJoinCode(teamId: team.id, by: mate)) {
             XCTAssertEqual($0 as? TeamError, .notAuthorised)
@@ -262,6 +262,17 @@ final class MoneyTests: XCTestCase {
         XCTAssertNil(Money.pence(from: ""))
         XCTAssertNil(Money.pence(from: "abc"))
         XCTAssertNil(Money.pence(from: "-1"))
+    }
+
+    /// Parsing runs on every keystroke, so anything a keyboard or a paste can
+    /// produce must come back nil rather than trap converting to Int.
+    func testOutOfRangeInputIsRejectedRatherThanCrashing() {
+        XCTAssertNil(Money.pence(from: "100000000000000000"))
+        XCTAssertNil(Money.pence(from: "1e300"))
+        XCTAssertNil(Money.pence(from: "inf"))
+        XCTAssertNil(Money.pence(from: "nan"))
+        XCTAssertNil(Money.pence(from: "10000.01"))
+        XCTAssertEqual(Money.pence(from: "10000"), Money.maxPence)
     }
 
     func testRoundTripThroughDisplay() async throws {

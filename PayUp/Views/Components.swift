@@ -232,6 +232,8 @@ extension ScreenHeader where Trailing == EmptyView {
 
 struct HeaderIconButton: View {
     let systemName: String
+    /// Read by VoiceOver; the symbol alone says nothing useful.
+    let label: String
     let action: () -> Void
 
     var body: some View {
@@ -242,6 +244,7 @@ struct HeaderIconButton: View {
                 .frame(width: 44, height: 44)
                 .background(Theme.surface, in: Circle())
         }
+        .accessibilityLabel(label)
     }
 }
 
@@ -259,5 +262,6 @@ struct HeaderAddButton: View {
         }
         .disabled(!enabled)
         .opacity(enabled ? 1 : 0.35)
+        .accessibilityLabel("New matchday")
     }
 }

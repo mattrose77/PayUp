@@ -54,13 +54,6 @@ struct PendingRow: View {
                 .strokeBorder(state.isFailed ? Color(hex: 0xFF6B6B).opacity(0.5) : .clear, lineWidth: 1)
         )
         .opacity(state.isPending ? 0.75 : 1)
-        .swipeActions(edge: .trailing) {
-            if state.isFailed {
-                Button(role: .destructive, action: discard) {
-                    Label("Discard", systemImage: "trash")
-                }
-            }
-        }
         .contextMenu {
             if state.isFailed {
                 Button(action: retry) { Label("Retry", systemImage: "arrow.clockwise") }

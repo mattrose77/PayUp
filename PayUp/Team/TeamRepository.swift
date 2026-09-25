@@ -32,7 +32,7 @@ enum TeamError: LocalizedError, Equatable {
             return message
         case .teamLimitReached(let limit):
             return limit == 1
-                ? "Free accounts can run one team, and you already own one."
+                ? "Each account can run one team, and you already own one."
                 : "Your account can own up to \(limit) teams."
         }
     }

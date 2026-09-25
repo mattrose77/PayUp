@@ -47,11 +47,11 @@ struct ShameBoardView: View {
                 VStack(spacing: 14) {
                     ScreenHeader(title: "Shame board", subtitle: "Season standings") {
                         if !store.fines.isEmpty {
-                            HeaderIconButton(systemName: "square.and.arrow.up") { sharing = true }
+                            HeaderIconButton(systemName: "square.and.arrow.up", label: "Share season standings") { sharing = true }
                         }
                     }
 
-                    DataStateContainer(state: store.state, retry: { await store.refresh() }) {
+                    DataStateContainer(state: store.state, refreshError: store.refreshError, retry: { await store.refresh() }) {
                         if store.fines.isEmpty {
                             EmptyStateView(
                                 icon: "flame",
@@ -146,7 +146,7 @@ struct ShameBoardView: View {
                     Text(standing.player.name)
                         .font(.system(size: 24, weight: .bold))
                         .foregroundStyle(Theme.bg)
-                    Text("\(standing.fines.count) fines · \(Money.string(standing.fines.outstandingPence)) outstanding")
+                    Text("\(standing.fines.count) fine\(standing.fines.count == 1 ? "" : "s") · \(Money.string(standing.fines.outstandingPence)) outstanding")
                         .font(.system(size: 13))
                         .foregroundStyle(Theme.bg.opacity(0.55))
                 }

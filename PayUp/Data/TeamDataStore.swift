@@ -74,22 +74,36 @@ final class TeamDataStore {
     }
 
     func load() async {
-        if state != .loaded { state = .loading }
+        let hadData = state == .loaded
+        if !hadData { state = .loading }
         do {
             async let players = playerRepo.players(teamId: teamId)
             async let types = fineTypeRepo.fineTypes(teamId: teamId)
             async let matches = matchRepo.matches(teamId: teamId)
             async let fines = fineRepo.fines(teamId: teamId)
 
-            self.players = try await players
-            self.fineTypes = try await types
-            self.matches = try await matches
-            self.fines = try await fines
+            // All four land before any is applied, so a failure part-way can't
+            // leave fines pointing at a player list from a different moment.
+            let fetched = try await (players, types, matches, fines)
+            self.players = fetched.0
+            self.fineTypes = fetched.1
+            self.matches = fetched.2
+            self.fines = fetched.3
+            refreshError = nil
             state = .loaded
         } catch {
-            state = .failed(error.localizedDescription)
+            if hadData {
+                // Keep showing what's there; say the refresh didn't work.
+                refreshError = error.localizedDescription
+            } else {
+                state = .failed(error.localizedDescription)
+            }
         }
     }
+
+    /// A failed pull-to-refresh over data that's already on screen. Shown as a
+    /// banner rather than replacing the screen with an error.
+    private(set) var refreshError: String?
 
     /// Pull-to-refresh: keep showing what's there, replace it if the fetch works.
     func refresh() async {

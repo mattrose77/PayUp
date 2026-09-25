@@ -173,6 +173,16 @@ struct SupabaseMatchRepository: MatchRepository {
     private struct CompleteUpdate: Encodable {
         let isComplete: Bool
         let completedAt: String?
+
+        enum CodingKeys: String, CodingKey { case isComplete, completedAt }
+
+        /// Synthesised Encodable drops nil optionals, so reopening would leave
+        /// the old `completed_at` in place. Send an explicit null instead.
+        func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encode(isComplete, forKey: .isComplete)
+            try container.encode(completedAt, forKey: .completedAt)
+        }
     }
 
     func matches(teamId: UUID) async throws -> [Match] {
@@ -243,6 +253,16 @@ struct SupabaseFineRepository: FineRepository {
     private struct PaidUpdate: Encodable {
         let paid: Bool
         let paidAt: String?
+
+        enum CodingKeys: String, CodingKey { case paid, paidAt }
+
+        /// Explicit null so marking a fine unpaid clears `paid_at` — the
+        /// synthesised version would omit the key and leave the old timestamp.
+        func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encode(paid, forKey: .paid)
+            try container.encode(paidAt, forKey: .paidAt)
+        }
     }
 
     func fines(teamId: UUID) async throws -> [Fine] {

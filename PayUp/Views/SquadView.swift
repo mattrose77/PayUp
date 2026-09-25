@@ -21,7 +21,7 @@ struct SquadView: View {
                             : "Your players"
                     )
 
-                    DataStateContainer(state: store.state, retry: { await store.refresh() }) {
+                    DataStateContainer(state: store.state, refreshError: store.refreshError, retry: { await store.refresh() }) {
                         addField
 
                         if let warning {

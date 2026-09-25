@@ -63,7 +63,7 @@ struct TeamSettingsView: View {
     private var nameSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             SectionLabel(text: "Team name")
-            TextField("", text: $name, prompt: Text("e.g. Minety FC").foregroundStyle(Theme.textFaint))
+            TextField("", text: $name, prompt: Text("e.g. Fines FC").foregroundStyle(Theme.textFaint))
                 .font(.system(size: 20, weight: .semibold))
                 .foregroundStyle(Theme.beige)
                 .textInputAutocapitalization(.words)

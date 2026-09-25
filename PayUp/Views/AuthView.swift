@@ -88,7 +88,7 @@ struct AuthView: View {
                 .font(.system(size: 22, weight: .bold))
                 .foregroundStyle(Theme.beige)
 
-            Text("Your account is created. We've sent a confirmation link to \(unconfirmed ?? email)  click it, then come back and sign in.")
+            Text("Your account is created. We've sent a confirmation link to \(unconfirmed ?? email) — click it, then come back and sign in.")
                 .font(.system(size: 15))
                 .foregroundStyle(Theme.textDim)
                 .fixedSize(horizontal: false, vertical: true)
@@ -123,7 +123,7 @@ struct AuthView: View {
     }
 
     private var spamWarning: String {
-        "It can take a minute to arrive, and it often lands in spam, it comes from a generic Supabase address, not from PayUp."
+        "It can take a minute to arrive. If you can't see it, check your spam or junk folder."
     }
 
     @ViewBuilder

@@ -16,6 +16,12 @@ struct TallyView: View {
 
     private var match: Match? { store.match(matchId) }
     private var players: [Player] { store.activePlayers }
+    /// Everyone who belongs on this matchday's list: the active squad, plus
+    /// anyone made inactive since who already has fines here — otherwise their
+    /// fines count towards the total but vanish from the rows and the share card.
+    private var roster: [Player] {
+        store.players.filter { $0.active || !store.fines(forMatch: matchId, player: $0.id).isEmpty }
+    }
     private var fineTypes: [FineType] { store.activeFineTypes }
     private var matchFines: [Fine] { store.fines(forMatch: matchId) }
 
@@ -70,22 +76,22 @@ struct TallyView: View {
                             .padding(.horizontal, 4)
                     }
 
-                    if players.isEmpty {
+                    if match.isComplete {
+                        completedRoster
+                    } else if players.isEmpty {
                         EmptyStateView(
                             icon: "person.2",
                             title: "No active players",
                             message: "Everyone who could be fined is inactive or hasn't been added yet. Add your squad in the Squad tab."
                         )
-                    } else if fineTypes.isEmpty && !match.isComplete {
+                    } else if fineTypes.isEmpty {
                         EmptyStateView(
                             icon: "sterlingsign.circle",
                             title: "No fines to give",
                             message: "You've got a squad but nothing to fine them for. Build your fines list in the Fines tab, then come back."
                         )
-                    } else if match.isComplete {
-                        completedRoster
                     } else {
-                        ForEach(players) { player in
+                        ForEach(roster) { player in
                             PlayerTallyRow(
                                 player: player,
                                 fines: store.fines(forMatch: matchId, player: player.id),
@@ -93,6 +99,10 @@ struct TallyView: View {
                             )
                             .contentShape(Rectangle())
                             .onTapGesture { apply(to: player, match: match) }
+                            .accessibilityElement(children: .combine)
+                            .accessibilityAddTraits(.isButton)
+                            .accessibilityHint("Adds the selected fine")
+                            .accessibilityAction { apply(to: player, match: match) }
                             .contextMenu {
                                 Button { inspecting = player } label: {
                                     Label("Player detail", systemImage: "person.text.rectangle")
@@ -139,6 +149,7 @@ struct TallyView: View {
                 Image(systemName: "square.and.arrow.up")
                     .font(.system(size: 15, weight: .semibold))
             }
+            .accessibilityLabel("Share matchday")
             .disabled(matchFines.isEmpty)
         }
     }
@@ -156,6 +167,8 @@ struct TallyView: View {
                             countToday: matchFines.count { $0.fineTypeId == type.id }
                         )
                         .id(type.id)
+                        .accessibilityElement(children: .combine)
+                        .accessibilityAddTraits(selectedTypeId == type.id ? [.isButton, .isSelected] : .isButton)
                         .onTapGesture {
                             Haptics.tap()
                             withAnimation(.snappy(duration: 0.18)) { selectedTypeId = type.id }
@@ -239,7 +252,7 @@ struct TallyView: View {
 
     @ViewBuilder
     private var completedRoster: some View {
-        let fined = players
+        let fined = roster
             .map { ($0, store.fines(forMatch: matchId, player: $0.id)) }
             .filter { !$0.1.isEmpty }
             .sorted { $0.1.totalPence > $1.1.totalPence }
@@ -280,6 +293,9 @@ struct TallyView: View {
                             ForEach(recent.prefix(6)) { fine in
                                 UndoPill(fine: fine, playerName: store.player(fine.playerId)?.name)
                                     .onTapGesture { undo(fine) }
+                                    .accessibilityElement(children: .combine)
+                                    .accessibilityAddTraits(.isButton)
+                                    .accessibilityLabel("Undo \(fine.description) for \(store.player(fine.playerId)?.name ?? "player")")
                             }
                         }
                         .padding(.horizontal, 16)
@@ -301,7 +317,7 @@ struct TallyView: View {
             card: ShareCard(
                 clubName: club,
                 subtitle: current.map { "v \($0.opponent) — \(ShareSummary.dateString($0.playedOn))" } ?? "",
-                rows: ShareSummary.matchdayTallies(fines: matchFines, players: players),
+                rows: ShareSummary.matchdayTallies(fines: matchFines, players: roster),
                 bigLabel: "today's damage",
                 bigAmount: Money.string(matchFines.totalPence),
                 closing: closing

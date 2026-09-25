@@ -42,7 +42,12 @@ struct TeamOnboardingView: View {
                 // signed in to the wrong account — and a Supabase session
                 // outlives an app uninstall, so it happens.
                 VStack(spacing: 14) {
-                    Button("Sign out") { Task { await auth.signOut() } }
+                    Button("Sign out") {
+                        Task {
+                            LocalState.clear()
+                            await auth.signOut()
+                        }
+                    }
                         .font(.system(size: 14, weight: .medium))
                         .foregroundStyle(Theme.textDim)
 
@@ -103,11 +108,12 @@ struct TeamOnboardingView: View {
         }
     }
 
-    /// Neutral and factual. There's nothing to sell yet, so no upgrade prompt.
+    /// Neutral and factual. There's nothing to sell yet, so no upgrade prompt —
+    /// and no "free" either, which would imply a paid tier App Review can't find.
     private var limitExplanation: String {
         let limit = session.entitlements.maxTeamsOwned
         return limit == 1
-            ? "Free accounts can run one team. You already own one, so you can't create another, you can still join a team with a code."
+            ? "Each account can run one team, and you already own one. You can still join a team with a code."
             : "Your account can own up to \(limit) teams and you're at that limit. You can still join a team with a code."
     }
 
@@ -149,8 +155,8 @@ struct TeamOnboardingView: View {
 
     private var createForm: some View {
         VStack(alignment: .leading, spacing: 20) {
-            field(label: "Team name", text: $teamName, prompt: "e.g. Minety FC")
-            field(label: "Your name", text: $displayName, prompt: "e.g. Matt")
+            field(label: "Team name", text: $teamName, prompt: "e.g. Fines FC")
+            field(label: "Your name", text: $displayName, prompt: "e.g. Jason")
             errorLine
 
             Button(busy ? "Creating…" : "Create team") { submitCreate() }
@@ -178,7 +184,7 @@ struct TeamOnboardingView: View {
                         if cleaned != new { joinCode = cleaned }
                     }
             }
-            field(label: "Your name", text: $displayName, prompt: "e.g. Matt")
+            field(label: "Your name", text: $displayName, prompt: "e.g. Jason")
             errorLine
 
             Button(busy ? "Joining…" : "Join team") { submitJoin() }

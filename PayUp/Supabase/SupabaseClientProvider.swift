@@ -24,7 +24,12 @@ enum SupabaseClientProvider {
             supabaseURL: Config.supabaseURL,
             supabaseKey: Config.supabasePublishableKey,
             options: SupabaseClientOptions(
-                db: .init(encoder: encoder, decoder: decoder)
+                db: .init(encoder: encoder, decoder: decoder),
+                // Opts in to the SDK's next-major behaviour and silences its
+                // runtime warning. Nothing here listens to authStateChanges;
+                // AuthService.restore() reads `auth.session`, which still
+                // refreshes an expired token before returning it.
+                auth: .init(emitLocalSessionAsInitialSession: true)
             )
         )
     }()

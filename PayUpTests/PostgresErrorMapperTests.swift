@@ -17,6 +17,17 @@ final class PostgresErrorMapperTests: XCTestCase {
         XCTAssertEqual(mapped("team_limit_reached"), .teamLimitReached(limit: 1))
     }
 
+    /// `.single()` on a row the other member just deleted. RemoteCall prefixes
+    /// the PostgREST code, so both the code and the wording are covered.
+    func testMissingRowReadsAsGoneRatherThanPostgrestJargon() {
+        let raw = "PGRST116 JSON object requested, multiple (or no) rows returned The result contains 0 rows"
+        guard case .serverRejected(let text) = mapped(raw) else {
+            return XCTFail("expected a readable serverRejected message")
+        }
+        XCTAssertFalse(text.contains("JSON"))
+        XCTAssertTrue(text.contains("refresh"))
+    }
+
     func testErrorsAreFoundInsideWrappedPostgresMessages() {
         // Postgres wraps RAISE messages, so matching has to be on substrings.
         XCTAssertEqual(

@@ -1,4 +1,5 @@
 import SwiftUI
+import SwiftData
 
 struct SettingsView: View {
     let auth: AuthService
@@ -8,15 +9,9 @@ struct SettingsView: View {
     @Environment(\.modelContext) private var context
     @State private var showingTeam = false
     @State private var deletion: AccountDeletionFlow?
-    @AppStorage(Club.storageKey) private var storedClubName = ""
     @AppStorage(Club.closingKey) private var storedClosing = Club.defaultClosing
 
-    @State private var name = ""
     @State private var closing = ""
-    @FocusState private var focused: Bool
-
-    private var trimmed: String { name.trimmingCharacters(in: .whitespaces) }
-    private var isValid: Bool { !trimmed.isEmpty }
 
     private var version: String {
         let info = Bundle.main.infoDictionary
@@ -37,7 +32,7 @@ struct SettingsView: View {
                                     Text(session.team?.name ?? Club.fallbackName)
                                         .font(.system(size: 17, weight: .semibold))
                                         .foregroundStyle(Theme.beige)
-                                    Text("\(session.members.count) of \(TeamRules.maxMembers) members")
+                                    Text("Rename, invite · \(session.members.count) of \(TeamRules.maxMembers) members")
                                         .font(.system(size: 12))
                                         .foregroundStyle(Theme.textDim)
                                 }
@@ -51,24 +46,6 @@ struct SettingsView: View {
                             .cardSurface()
                         }
                         .buttonStyle(.plain)
-                    }
-
-                    VStack(alignment: .leading, spacing: 10) {
-                        SectionLabel(text: "Club name")
-                        TextField("", text: $name, prompt: Text("e.g. Minety FC").foregroundStyle(Theme.textFaint))
-                            .font(.system(size: 20, weight: .semibold))
-                            .foregroundStyle(Theme.beige)
-                            .textInputAutocapitalization(.words)
-                            .autocorrectionDisabled()
-                            .submitLabel(.done)
-                            .focused($focused)
-                            .padding(16)
-                            .cardSurface()
-                            .onSubmit(save)
-                        Text("Shown on the season pot card.")
-                            .font(.system(size: 13))
-                            .foregroundStyle(Theme.textDim)
-                            .padding(.horizontal, 2)
                     }
 
                     VStack(alignment: .leading, spacing: 10) {
@@ -87,10 +64,12 @@ struct SettingsView: View {
 
                     Button("Save", action: save)
                         .buttonStyle(AccentButtonStyle())
-                        .disabled(!isValid)
 
                     Button("Sign out") {
                         Task {
+                            // The next account on this phone mustn't inherit
+                            // this club's name or sign-off.
+                            LocalState.clear()
                             await auth.signOut()
                             dismiss()
                         }
@@ -120,9 +99,7 @@ struct SettingsView: View {
         .sheet(isPresented: $showingTeam) { TeamSettingsView().environment(\.teamSession, session) }
         .sheet(item: $deletion) { DeleteAccountView(flow: $0) }
         .onAppear {
-            name = storedClubName
             closing = storedClosing
-            focused = true
         }
     }
 
@@ -197,9 +174,9 @@ struct SettingsView: View {
         }
     }
 
+    /// The club name shown on the pot card and share cards is the team's name,
+    /// renamed under Team above — one name, stored on the server.
     private func save() {
-        guard isValid else { return }
-        storedClubName = trimmed
         storedClosing = closing.trimmingCharacters(in: .whitespacesAndNewlines)
         Haptics.bump()
         dismiss()

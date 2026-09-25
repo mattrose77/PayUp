@@ -110,8 +110,20 @@ struct RootView: View {
     private func failed(_ message: String) -> some View {
         ZStack {
             Theme.bg.ignoresSafeArea()
-            ErrorStateView(message: message) {
-                Task { await session?.refresh() }
+            VStack(spacing: 18) {
+                ErrorStateView(message: message) {
+                    Task { await session?.refresh() }
+                }
+                // A revoked or expired session fails here on every retry, so
+                // there has to be a way back to sign-in from this screen.
+                Button("Sign out") {
+                    Task {
+                        LocalState.clear()
+                        await auth.signOut()
+                    }
+                }
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(Theme.textDim)
             }
             .padding(20)
         }

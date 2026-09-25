@@ -4,6 +4,7 @@ struct FineTypesView: View {
     @Environment(\.teamDataStore) private var store
 
     @State private var editing: FineType?
+    @State private var pendingDelete: FineType?
     @State private var error: String?
     @State private var newName = ""
     @State private var newAmount = ""
@@ -19,7 +20,7 @@ struct FineTypesView: View {
                 VStack(spacing: 8) {
                     ScreenHeader(title: "Fines", subtitle: subtitle)
 
-                    DataStateContainer(state: store.state, retry: { await store.refresh() }) {
+                    DataStateContainer(state: store.state, refreshError: store.refreshError, retry: { await store.refresh() }) {
                         addRow
 
                         if let warning {
@@ -67,7 +68,7 @@ struct FineTypesView: View {
                                                 systemImage: type.active ? "archivebox" : "arrow.uturn.backward"
                                             )
                                         }
-                                        Button(role: .destructive) { delete(type) } label: {
+                                        Button(role: .destructive) { pendingDelete = type } label: {
                                             Label("Delete", systemImage: "trash")
                                         }
                                     }
@@ -85,6 +86,19 @@ struct FineTypesView: View {
             .task { await store.loadIfNeeded() }
             .sheet(item: $editing) { type in
                 FineTypeEditor(type: type).environment(\.teamDataStore, store)
+            }
+            .alert(
+                pendingDelete.map { "Delete \($0.name)?" } ?? "",
+                isPresented: Binding(
+                    get: { pendingDelete != nil },
+                    set: { if !$0 { pendingDelete = nil } }
+                ),
+                presenting: pendingDelete
+            ) { type in
+                Button("Delete", role: .destructive) { delete(type) }
+                Button("Cancel", role: .cancel) { pendingDelete = nil }
+            } message: { type in
+                Text(deleteMessage(for: type))
             }
         }
     }
@@ -171,7 +185,14 @@ struct FineTypesView: View {
 
     /// Deleting only removes the link — issued fines keep their own description
     /// and amount, so nothing in the history becomes unreadable.
+    private func deleteMessage(for type: FineType) -> String {
+        let issued = store.fines.count { $0.fineTypeId == type.id }
+        guard issued > 0 else { return "It's never been used, so nothing else changes." }
+        return "It's been issued \(issued) time\(issued == 1 ? "" : "s"). Those fines keep their name and amount — only the option to give it again goes. Archive it instead if you might want it back."
+    }
+
     private func delete(_ type: FineType) {
+        pendingDelete = nil
         error = nil
         Task {
             do { try await store.deleteFineType(type) }
@@ -264,12 +285,11 @@ struct FineTypeEditor: View {
                         .buttonStyle(AccentButtonStyle())
                         .disabled(busy || !isValid)
 
-                    if let existing = type {
+                    if type != nil {
                         Text("Editing the amount won't change fines already issued — each one keeps what it was worth on the day.")
                             .font(.system(size: 13))
                             .foregroundStyle(Theme.textDim)
                             .padding(.horizontal, 2)
-                        let _ = existing
                     }
                 }
                 .padding(20)

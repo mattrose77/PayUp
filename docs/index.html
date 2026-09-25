@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reset your PayUp password</title>
+<style>
+  :root{
+    --bg:#22211F; --surface:#2B2925; --text:#EDE7DA; --muted:#A9A398;
+    --accent:#C4F82A; --border:#3A3833; --error:#FF8A65;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center;
+    background:var(--bg); color:var(--text);
+    font-family:-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    padding:20px;
+  }
+  .card{
+    width:100%; max-width:380px; background:var(--surface);
+    border:1px solid var(--border); border-radius:14px; padding:32px 28px;
+  }
+  .wordmark{ display:flex; align-items:center; gap:8px; font-weight:800; font-size:15px; margin-bottom:24px; }
+  .wordmark .dot{ width:9px; height:9px; border-radius:2px; background:var(--accent); }
+  h1{ font-size:20px; margin:0 0 8px; }
+  p.sub{ color:var(--muted); font-size:14px; margin:0 0 24px; line-height:1.5; }
+  label{ display:block; font-size:13px; color:var(--muted); margin-bottom:6px; }
+  input{
+    width:100%; padding:11px 12px; margin-bottom:16px;
+    background:#1E1D1B; border:1px solid var(--border); border-radius:8px;
+    color:var(--text); font-size:15px;
+  }
+  input:focus{ outline:none; border-color:var(--accent); }
+  button{
+    width:100%; padding:12px; border:none; border-radius:8px;
+    background:var(--accent); color:#22211F; font-weight:700; font-size:15px;
+    cursor:pointer;
+  }
+  button:disabled{ opacity:0.5; cursor:default; }
+  .msg{ font-size:14px; margin-top:16px; line-height:1.5; }
+  .msg.error{ color:var(--error); }
+  .msg.success{ color:var(--accent); }
+  .hidden{ display:none; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="wordmark"><span class="dot"></span>PayUp</div>
+
+    <div id="loadingState">
+      <h1>Checking your link…</h1>
+      <p class="sub">One moment.</p>
+    </div>
+
+    <div id="formState" class="hidden">
+      <h1>Set a new password</h1>
+      <p class="sub">Choose a new password for your PayUp account.</p>
+      <form id="resetForm">
+        <label for="pw1">New password</label>
+        <input type="password" id="pw1" autocomplete="new-password" minlength="6" required>
+        <label for="pw2">Confirm password</label>
+        <input type="password" id="pw2" autocomplete="new-password" minlength="6" required>
+        <button type="submit" id="submitBtn">Update password</button>
+      </form>
+      <div id="formMsg" class="msg"></div>
+    </div>
+
+    <div id="expiredState" class="hidden">
+      <h1>This link has expired</h1>
+      <p class="sub">Password reset links only work once and expire after a short time. Go back to PayUp and request a new one from the sign-in screen.</p>
+    </div>
+
+    <div id="doneState" class="hidden">
+      <h1>Password updated</h1>
+      <p class="sub">You can now sign in to PayUp with your new password.</p>
+    </div>
+  </div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<script>
+  var SUPABASE_URL = "https://xdyheafhavsxvqwmpnsl.supabase.co";
+  var SUPABASE_ANON_KEY = "sb_publishable_UvNo96gjZ-iY3SuE1XnNLg_1jGByvyt";
+  var client = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+  var loadingState = document.getElementById('loadingState');
+  var formState = document.getElementById('formState');
+  var expiredState = document.getElementById('expiredState');
+  var doneState = document.getElementById('doneState');
+
+  function show(el){
+    [loadingState, formState, expiredState, doneState].forEach(function(e){ e.classList.add('hidden'); });
+    el.classList.remove('hidden');
+  }
+
+  async function establishSession(){
+    // PKCE flow: ?code=...
+    var params = new URLSearchParams(window.location.search);
+    if (params.get('code')){
+      try {
+        await client.auth.exchangeCodeForSession(window.location.href);
+      } catch(e){ /* fall through to session check below */ }
+    }
+    // Implicit flow (#access_token=...&type=recovery) is handled automatically
+    // by the client on load. Give it a moment, then check.
+    var attempts = 0;
+    while (attempts < 10){
+      var res = await client.auth.getSession();
+      if (res.data && res.data.session){ return true; }
+      await new Promise(function(r){ setTimeout(r, 300); });
+      attempts++;
+    }
+    return false;
+  }
+
+  establishSession().then(function(ok){
+    if (ok){ show(formState); } else { show(expiredState); }
+  });
+
+  document.getElementById('resetForm').addEventListener('submit', async function(e){
+    e.preventDefault();
+    var pw1 = document.getElementById('pw1').value;
+    var pw2 = document.getElementById('pw2').value;
+    var msg = document.getElementById('formMsg');
+    var btn = document.getElementById('submitBtn');
+    msg.textContent = '';
+    msg.className = 'msg';
+
+    if (pw1.length < 6){
+      msg.textContent = 'Password must be at least 6 characters.';
+      msg.className = 'msg error';
+      return;
+    }
+    if (pw1 !== pw2){
+      msg.textContent = "Passwords don't match.";
+      msg.className = 'msg error';
+      return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = 'Updating…';
+
+    var result = await client.auth.updateUser({ password: pw1 });
+
+    if (result.error){
+      msg.textContent = result.error.message || 'Something went wrong. Please try again.';
+      msg.className = 'msg error';
+      btn.disabled = false;
+      btn.textContent = 'Update password';
+    } else {
+      show(doneState);
+    }
+  });
+</script>
+</body>
+</html>

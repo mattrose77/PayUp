@@ -72,6 +72,14 @@ struct AuthView: View {
         .animation(.snappy(duration: 0.25), value: mode)
         .animation(.snappy(duration: 0.25), value: unconfirmed)
         .task(id: throttle.lastSent) { await countDown() }
+        // A dead reset link lands here, on the form that sends a fresh one,
+        // with the reason under the email field.
+        .onChange(of: auth.resetLinkProblem, initial: true) { _, problem in
+            guard let problem else { return }
+            switchTo(.reset)
+            emailError = problem
+            auth.resetLinkProblem = nil
+        }
     }
 
     // MARK: - Confirmation

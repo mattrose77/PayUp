@@ -38,13 +38,18 @@ extension EnvironmentValues {
 struct RootView: View {
     @Environment(\.modelContext) private var context
 
-    @State private var auth = AuthService(client: SupabaseClientProvider.shared)
+    let auth: AuthService
+
     @State private var session: TeamSession?
     @State private var showSplash = true
 
     var body: some View {
         ZStack {
             content
+            if auth.isRedeemingResetLink && !showSplash {
+                redeeming
+                    .transition(.opacity)
+            }
             if showSplash {
                 SplashView()
                     .transition(.opacity)
@@ -62,6 +67,42 @@ struct RootView: View {
         .onChange(of: auth.state) { _, _ in
             Task { await buildSessionIfNeeded() }
         }
+        // Signed out, AuthView shows a dead link inline. Signed in, there's no
+        // form to put it under, so it's an alert rather than nothing at all.
+        .alert(
+            "Reset link didn't work",
+            isPresented: signedInResetProblem,
+            actions: { Button("OK") { auth.resetLinkProblem = nil } },
+            message: {
+                Text((auth.resetLinkProblem ?? "")
+                    .replacingOccurrences(of: " below", with: " from the sign-in screen"))
+            }
+        )
+    }
+
+    private var signedInResetProblem: Binding<Bool> {
+        Binding(
+            get: {
+                guard auth.resetLinkProblem != nil else { return false }
+                switch auth.state {
+                case .signedIn, .recovering: return true
+                case .restoring, .signedOut: return false
+                }
+            },
+            set: { if !$0 { auth.resetLinkProblem = nil } }
+        )
+    }
+
+    private var redeeming: some View {
+        ZStack {
+            Theme.bg.ignoresSafeArea()
+            VStack(spacing: 14) {
+                ProgressView().tint(Theme.accent)
+                Text("Checking your reset link…")
+                    .font(.system(size: 15))
+                    .foregroundStyle(Theme.textDim)
+            }
+        }
     }
 
     @ViewBuilder
@@ -74,6 +115,11 @@ struct RootView: View {
 
         case .signedOut:
             AuthView(auth: auth)
+
+        case .recovering:
+            // Checked before any team loads: the recovery session is a real
+            // session, but the app stays shut until a new password is set.
+            SetNewPasswordView(auth: auth)
 
         case .signedIn:
             if let session {

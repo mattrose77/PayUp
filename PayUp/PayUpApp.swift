@@ -5,6 +5,10 @@ import SwiftData
 struct PayUpApp: App {
     let container: ModelContainer
 
+    /// Owned here rather than in RootView so the scene's URL handler can reach
+    /// it — reset links arrive through `.onOpenURL`.
+    @State private var auth = AuthService(client: SupabaseClientProvider.shared)
+
     init() {
         // Only the team layer is local now; everything else lives in Supabase.
         let schema = Schema([Team.self, TeamMember.self])
@@ -22,9 +26,16 @@ struct PayUpApp: App {
 
     var body: some Scene {
         WindowGroup {
-            RootView()
+            RootView(auth: auth)
                 .preferredColorScheme(.dark)
                 .tint(Theme.accent)
+                // Delivered for both a cold start (the link launched the app)
+                // and a warm one. On a cold start it can land before or after
+                // restore() finishes; AuthService makes either order end on the
+                // new-password screen.
+                .onOpenURL { url in
+                    Task { await auth.handle(url) }
+                }
         }
         .modelContainer(container)
     }

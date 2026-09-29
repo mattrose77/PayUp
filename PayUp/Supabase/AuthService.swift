@@ -17,14 +17,33 @@ final class AuthService {
         case restoring
         case signedOut
         case signedIn(userId: String, email: String)
+        /// Signed in through a password reset link. The app stays closed
+        /// until a new password is set — see SetNewPasswordView.
+        case recovering(userId: String, email: String)
     }
 
     private(set) var state: State = .restoring
 
-    private let client: SupabaseClient
+    /// Why the last reset link couldn't be used. Shown on the sign-in screen
+    /// (or as an alert if someone is signed in) with a way to request another.
+    var resetLinkProblem: String?
 
-    init(client: SupabaseClient) {
+    /// A reset code is being exchanged. Covers the gap between tapping the
+    /// link and the set-password screen appearing.
+    private(set) var isRedeemingResetLink = false
+
+    private let client: SupabaseClient
+    private let recovery: PasswordRecoveryBackend
+    private let defaults: UserDefaults
+
+    init(
+        client: SupabaseClient,
+        recovery: PasswordRecoveryBackend? = nil,
+        defaults: UserDefaults = .standard
+    ) {
         self.client = client
+        self.recovery = recovery ?? SupabasePasswordRecoveryBackend(client: client)
+        self.defaults = defaults
     }
 
     var userId: String? {
@@ -39,10 +58,16 @@ final class AuthService {
     }
 
     /// Reads any persisted session before the UI decides what to show.
+    ///
+    /// On a cold start from a reset link this races `handle(_:)`. Whichever
+    /// finishes first, the reset link wins: restore only writes while the state
+    /// is still `.restoring`, so it can't paper over a recovery session with a
+    /// plain sign-in (which would skip the new-password screen).
     func restore() async {
+        let restored: State
         do {
             let session = try await client.auth.session
-            state = .signedIn(
+            restored = restoredState(
                 userId: UserID.normalise(session.user.id.uuidString),
                 email: session.user.email ?? ""
             )
@@ -52,16 +77,71 @@ final class AuthService {
             // Stay signed in on the stored session; the team screen then shows
             // a retry (and a sign-out) instead of bouncing to the sign-in form.
             if let stored = client.auth.currentSession {
-                state = .signedIn(
+                restored = restoredState(
                     userId: UserID.normalise(stored.user.id.uuidString),
                     email: stored.user.email ?? ""
                 )
             } else {
-                state = .signedOut
+                restored = .signedOut
             }
         } catch {
-            state = .signedOut
+            restored = .signedOut
         }
+        guard state == .restoring else { return }
+        state = restored
+    }
+
+    /// A session left over from an unfinished reset goes back to the
+    /// new-password screen, not into the app.
+    func restoredState(userId: String, email: String) -> State {
+        if let pending = PendingRecovery.userId(defaults), UserID.matches(pending, userId) {
+            return .recovering(userId: userId, email: email)
+        }
+        return .signedIn(userId: userId, email: email)
+    }
+
+    // MARK: - Password reset
+
+    /// Handles an incoming URL. Returns false if it isn't a reset link, so the
+    /// caller can pass it on to something else.
+    @discardableResult
+    func handle(_ url: URL) async -> Bool {
+        guard let link = PasswordResetLink.parse(url) else { return false }
+
+        switch link {
+        case .failed(let message):
+            resetLinkProblem = message
+        case .code:
+            // A second tap while the first is still in flight would try to
+            // spend the same code twice and report the second as "expired".
+            guard !isRedeemingResetLink else { return true }
+            isRedeemingResetLink = true
+            resetLinkProblem = nil
+            do {
+                let user = try await recovery.exchange(url)
+                // The link can be for a different account from the one signed
+                // in here; its cached club name and display name mustn't carry over.
+                if case .signedIn(let previous, _) = state, !UserID.matches(previous, user.userId) {
+                    LocalState.clear(defaults)
+                }
+                PendingRecovery.set(user.userId, defaults)
+                state = .recovering(userId: user.userId, email: user.email)
+            } catch {
+                // State is left alone: a signed-in user stays signed in, and on
+                // a cold start restore() still resolves `.restoring` as usual.
+                resetLinkProblem = ResetLinkProblem.message(for: error)
+            }
+            isRedeemingResetLink = false
+        }
+        return true
+    }
+
+    /// Sets the new password and lets the user into the app.
+    func setNewPassword(_ password: String) async throws {
+        guard case .recovering(let userId, let email) = state else { return }
+        try await recovery.updatePassword(password)
+        PendingRecovery.set(nil, defaults)
+        state = .signedIn(userId: userId, email: email)
     }
 
     func signIn(email: String, password: String) async throws {
@@ -90,11 +170,12 @@ final class AuthService {
     }
 
     func sendPasswordReset(email: String) async throws {
-        try await client.auth.resetPasswordForEmail(email)
+        try await client.auth.resetPasswordForEmail(email, redirectTo: PasswordResetLink.redirectURL)
     }
 
     func signOut() async {
         try? await client.auth.signOut()
+        PendingRecovery.set(nil, defaults)
         state = .signedOut
     }
 }

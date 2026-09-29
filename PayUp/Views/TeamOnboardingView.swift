@@ -20,7 +20,7 @@ struct TeamOnboardingView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 26) {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("PayUp")
+                    Text("PayUp FC")
                         .font(.system(size: 34, weight: .bold))
                         .foregroundStyle(Theme.beige)
                     Text("Set up your team, or join one someone's already made.")

@@ -188,7 +188,7 @@ struct TeamSettingsView: View {
     // MARK: - Actions
 
     private func shareMessage(_ code: String) -> String {
-        "Join \(team?.name ?? "our team") on PayUp. Code: \(code)"
+        "Join \(team?.name ?? "our team") on PayUp FC. Code: \(code)"
     }
 
     private func saveName() {

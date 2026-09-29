@@ -33,7 +33,7 @@ struct SplashView: View {
                 .opacity(badgeIn ? 1 : 0)
 
                 VStack(spacing: 8) {
-                    Text("PayUp")
+                    Text("PayUp FC")
                         .font(.system(size: 42, weight: .bold))
                         .foregroundStyle(Theme.beige)
                     Text(quip)

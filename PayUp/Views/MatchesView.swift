@@ -17,7 +17,7 @@ struct MatchesView: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 14) {
-                    ScreenHeader(title: "PayUp", subtitle: "Matchday fines") {
+                    ScreenHeader(title: "PayUp FC", subtitle: "Matchday fines") {
                         HStack(spacing: 10) {
                             HeaderIconButton(systemName: "gearshape.fill", label: "Settings") { showingSettings = true }
                             if !store.matches.isEmpty {

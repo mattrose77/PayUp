@@ -189,7 +189,7 @@ struct AuthView: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("PayUp")
+            Text("PayUp FC")
                 .font(.system(size: 34, weight: .bold))
                 .foregroundStyle(Theme.beige)
             Text(subtitle)

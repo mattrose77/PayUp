@@ -30,9 +30,39 @@
 <body>
   <div class="card">
     <div class="wordmark"><span class="dot"></span>PayUp</div>
-    <h1>Open this on your phone</h1>
-    <p>PayUp's email links (confirming your address or resetting your password) only work on the phone where the app is installed — that's where they open automatically.</p>
-    <p>If you've already tapped this on your phone, it's already worked — go back to PayUp and carry on. Otherwise, open the email on your phone instead, or, if the link's gone stale, head back to PayUp to request a new one.</p>
+    <h1 id="heading">Open this on your phone</h1>
+    <p id="line1">PayUp's email links (confirming your address or resetting your password) only work on the phone where the app is installed — that's where they open automatically.</p>
+    <p id="line2">If you've already tapped this on your phone, it's already worked — go back to PayUp and carry on. Otherwise, open the email on your phone instead, or, if the link's gone stale, head back to PayUp to request a new one.</p>
   </div>
+
+  <script>
+    (function(){
+      function getParam(name){
+        var query = new URLSearchParams(window.location.search);
+        if (query.has(name)) return query.get(name);
+        var hash = window.location.hash.indexOf('#') === 0 ? window.location.hash.slice(1) : window.location.hash;
+        return new URLSearchParams(hash).get(name);
+      }
+
+      var type = getParam('type');
+      var heading = document.getElementById('heading');
+      var line1 = document.getElementById('line1');
+      var line2 = document.getElementById('line2');
+
+      if (type === 'signup' || type === 'email_change'){
+        // This is the normal, successful landing spot for a confirm-your-email link.
+        heading.textContent = "Thanks for joining PayUp!";
+        line1.textContent = "You've confirmed your account — head back to the app and sign in.";
+        line2.textContent = "You can close this tab now.";
+      } else if (type === 'recovery'){
+        // Password reset links redirect straight into the app on the right phone;
+        // landing here means it was opened somewhere else, or it's expired.
+        heading.textContent = "Open this on your phone";
+        line1.textContent = "Password reset links only work on the phone where PayUp is installed — the app opens automatically when you tap the link there.";
+        line2.textContent = "Open the email on your phone instead, or, if the link's gone stale, go back to PayUp's sign-in screen to request a new one.";
+      }
+      // Otherwise, leave the generic fallback copy already in the page.
+    })();
+  </script>
 </body>
 </html>

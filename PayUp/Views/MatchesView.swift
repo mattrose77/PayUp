@@ -221,6 +221,7 @@ struct NewMatchSheet: View {
     @State private var busy = false
     @State private var error: String?
     @FocusState private var opponentFocused: Bool
+    @FocusState private var itemFocused: Bool
 
     var body: some View {
         NavigationStack {
@@ -259,6 +260,7 @@ struct NewMatchSheet: View {
                             .font(.system(size: 17, weight: .medium))
                             .foregroundStyle(Theme.beige)
                             .textInputAutocapitalization(.sentences)
+                            .focused($itemFocused)
                             .padding(16)
                             .cardSurface()
                             .onSubmit(save)
@@ -274,6 +276,7 @@ struct NewMatchSheet: View {
                 }
                 .padding(20)
             }
+            .keyboardDismissable(isFocused: opponentFocused || itemFocused)
             .screenBackground()
             .navigationTitle("New matchday")
             .navigationBarTitleDisplayMode(.inline)

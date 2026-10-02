@@ -77,6 +77,7 @@ struct SquadView: View {
                 .padding(.bottom, 28)
             }
             .refreshable { await store.refresh() }
+            .keyboardDismissable(isFocused: addFocused)
             .screenBackground()
             .toolbar(.hidden, for: .navigationBar)
             .task { await store.loadIfNeeded() }

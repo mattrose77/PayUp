@@ -12,6 +12,7 @@ struct SettingsView: View {
     @AppStorage(Club.closingKey) private var storedClosing = Club.defaultClosing
 
     @State private var closing = ""
+    @FocusState private var closingFocused: Bool
 
     private var version: String {
         let info = Bundle.main.infoDictionary
@@ -54,6 +55,7 @@ struct SettingsView: View {
                             .font(.system(size: 15))
                             .foregroundStyle(Theme.beige)
                             .lineLimit(2...3)
+                            .focused($closingFocused)
                             .padding(16)
                             .cardSurface()
                         Text("The last line of every shared summary.")
@@ -86,6 +88,7 @@ struct SettingsView: View {
                 }
                 .padding(20)
             }
+            .keyboardDismissable(isFocused: closingFocused)
             .screenBackground()
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)

@@ -68,6 +68,7 @@ struct AuthView: View {
             }
             .padding(20)
         }
+        .keyboardDismissable(isFocused: focus != nil)
         .screenBackground()
         .animation(.snappy(duration: 0.25), value: mode)
         .animation(.snappy(duration: 0.25), value: unconfirmed)

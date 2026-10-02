@@ -14,7 +14,9 @@ struct TeamOnboardingView: View {
     @State private var error: String?
     @State private var busy = false
     @State private var deletion: AccountDeletionFlow?
-    @FocusState private var focused: Bool
+    @FocusState private var focus: Field?
+
+    private enum Field { case teamName, joinCode, displayName }
 
     var body: some View {
         ScrollView {
@@ -63,6 +65,7 @@ struct TeamOnboardingView: View {
             }
             .padding(20)
         }
+        .keyboardDismissable(isFocused: focus != nil)
         .screenBackground()
         .animation(.snappy(duration: 0.25), value: mode)
         .sheet(item: $deletion) { DeleteAccountView(flow: $0) }
@@ -155,8 +158,8 @@ struct TeamOnboardingView: View {
 
     private var createForm: some View {
         VStack(alignment: .leading, spacing: 20) {
-            field(label: "Team name", text: $teamName, prompt: "e.g. Fines FC")
-            field(label: "Your name", text: $displayName, prompt: "e.g. Jason")
+            field(label: "Team name", text: $teamName, prompt: "e.g. Fines FC", focusValue: .teamName)
+            field(label: "Your name", text: $displayName, prompt: "e.g. Jason", focusValue: .displayName)
             errorLine
 
             Button(busy ? "Creating…" : "Create team") { submitCreate() }
@@ -176,7 +179,7 @@ struct TeamOnboardingView: View {
                     .foregroundStyle(Theme.beige)
                     .textInputAutocapitalization(.characters)
                     .autocorrectionDisabled()
-                    .focused($focused)
+                    .focused($focus, equals: .joinCode)
                     .padding(16)
                     .cardSurface()
                     .onChange(of: joinCode) { _, new in
@@ -184,7 +187,7 @@ struct TeamOnboardingView: View {
                         if cleaned != new { joinCode = cleaned }
                     }
             }
-            field(label: "Your name", text: $displayName, prompt: "e.g. Jason")
+            field(label: "Your name", text: $displayName, prompt: "e.g. Jason", focusValue: .displayName)
             errorLine
 
             Button(busy ? "Joining…" : "Join team") { submitJoin() }
@@ -193,10 +196,10 @@ struct TeamOnboardingView: View {
 
             backButton
         }
-        .onAppear { focused = true }
+        .onAppear { focus = .joinCode }
     }
 
-    private func field(label: String, text: Binding<String>, prompt: String) -> some View {
+    private func field(label: String, text: Binding<String>, prompt: String, focusValue: Field) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             SectionLabel(text: label)
             TextField("", text: text, prompt: Text(prompt).foregroundStyle(Theme.textFaint))
@@ -204,6 +207,7 @@ struct TeamOnboardingView: View {
                 .foregroundStyle(Theme.beige)
                 .textInputAutocapitalization(.words)
                 .autocorrectionDisabled()
+                .focused($focus, equals: focusValue)
                 .padding(16)
                 .cardSurface()
         }

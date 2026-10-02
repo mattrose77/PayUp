@@ -46,6 +46,7 @@ struct DeleteAccountView: View {
                 }
                 .padding(20)
             }
+            .keyboardDismissable(isFocused: focus != nil)
             .screenBackground()
             .navigationTitle("Delete account")
             .navigationBarTitleDisplayMode(.inline)

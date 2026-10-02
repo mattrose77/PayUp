@@ -9,6 +9,7 @@ struct TeamSettingsView: View {
     @State private var pendingRemoval: TeamMember?
     @State private var confirmingLeave = false
     @State private var error: String?
+    @FocusState private var nameFocused: Bool
 
     private var team: Team? { session.team }
 
@@ -26,6 +27,7 @@ struct TeamSettingsView: View {
                 }
                 .padding(20)
             }
+            .keyboardDismissable(isFocused: nameFocused)
             .screenBackground()
             .navigationTitle("Team")
             .navigationBarTitleDisplayMode(.inline)
@@ -69,6 +71,7 @@ struct TeamSettingsView: View {
                 .textInputAutocapitalization(.words)
                 .autocorrectionDisabled()
                 .submitLabel(.done)
+                .focused($nameFocused)
                 .padding(16)
                 .cardSurface()
                 .onSubmit(saveName)

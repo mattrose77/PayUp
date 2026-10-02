@@ -81,6 +81,7 @@ struct FineTypesView: View {
                 .padding(.bottom, 28)
             }
             .refreshable { await store.refresh() }
+            .keyboardDismissable(isFocused: focus != nil)
             .screenBackground()
             .toolbar(.hidden, for: .navigationBar)
             .task { await store.loadIfNeeded() }
@@ -239,6 +240,7 @@ struct FineTypeEditor: View {
     @State private var busy = false
     @State private var error: String?
     @FocusState private var nameFocused: Bool
+    @FocusState private var amountFocused: Bool
 
     private var amountPence: Int? { Money.pence(from: amountText) }
     private var isValid: Bool {
@@ -270,6 +272,7 @@ struct FineTypeEditor: View {
                                 .font(.tally(24, .bold))
                                 .foregroundStyle(Theme.beige)
                                 .keyboardType(.decimalPad)
+                                .focused($amountFocused)
                         }
                         .padding(16)
                         .cardSurface()
@@ -294,6 +297,7 @@ struct FineTypeEditor: View {
                 }
                 .padding(20)
             }
+            .keyboardDismissable(isFocused: nameFocused || amountFocused)
             .screenBackground()
             .navigationTitle(type == nil ? "New fine" : "Edit fine")
             .navigationBarTitleDisplayMode(.inline)

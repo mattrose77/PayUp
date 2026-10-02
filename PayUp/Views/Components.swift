@@ -184,6 +184,31 @@ extension View {
     func screenBackground() -> some View {
         background(Theme.bg.ignoresSafeArea())
     }
+
+    /// Two ways out of the keyboard on any screen with a text field: a Done
+    /// button above it (the decimal pad has no return key, and the rapid-entry
+    /// fields refocus on submit) and dragging the scroll view. The keyboard sits
+    /// over the tab bar, so this is also what makes switching tabs possible.
+    ///
+    /// Apply to the screen's ScrollView. `isFocused` gates the button so only
+    /// the screen that owns the focused field contributes one — every tab stays
+    /// alive in the TabView, and ungated keyboard toolbars stack up.
+    func keyboardDismissable(isFocused: Bool) -> some View {
+        scrollDismissesKeyboard(.interactively)
+            .toolbar {
+                ToolbarItemGroup(placement: .keyboard) {
+                    if isFocused {
+                        Spacer()
+                        Button("Done") {
+                            UIApplication.shared.sendAction(
+                                #selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil
+                            )
+                        }
+                        .fontWeight(.semibold)
+                    }
+                }
+            }
+    }
 }
 
 enum Haptics {

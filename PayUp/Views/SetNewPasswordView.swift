@@ -50,6 +50,7 @@ struct SetNewPasswordView: View {
             }
             .padding(20)
         }
+        .keyboardDismissable(isFocused: focus != nil)
         .screenBackground()
         .onAppear { focus = .password }
     }

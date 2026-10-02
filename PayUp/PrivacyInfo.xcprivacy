@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
-  What PayUp itself collects and why. Everything goes to the app's own Supabase
+  What PayUp FC itself collects and why. Everything goes to the app's own Supabase
   project to make the app work; nothing is used for tracking or advertising and
   there is no analytics SDK. Keep this in step with the App Privacy answers in
   App Store Connect.

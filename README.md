@@ -1,4 +1,4 @@
-# PayUp
+# PayUp FC
 
 Matchday fines tracker for a Saturday football team. SwiftUI, iOS 17+, iPhone only.
 Data lives in Supabase (auth + Postgres with row-level security); SwiftData is
